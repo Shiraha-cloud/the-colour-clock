@@ -7,7 +7,7 @@
     <string name="mode_colour">COLOUR</string>
 
     <string name="about_heading">Time as a hexadecimal colour</string>
-    <string name="about_body">The Colour Clock transforms time into a sublime spectrum of colours. This is a native Android rendering of thecolourclock.com, the experimental project by digital product designer Jack Hughes.</string>
+    <string name="about_body">本应用秉持极简与纯粹的离线设计理念，全程无需接入互联网。我们郑重承诺：不采集、不存储、亦不传输任何用户个人信息或设备数据。您的所有操作痕迹与数据，均安全且唯一地留存于您的本地设备之中。本应用未嵌入任何第三方 SDK，以绝对的本地化运行，默默守护您的数字隐私。</string>
     <string name="about_credit">designwithjack.com</string>
     <string name="about_font">Original typeface is Aeonik Mono by CoType. This build uses the system monospace face.</string>
     <string name="about_made">Time follows your device clock, including time zone and daylight saving changes.</string>

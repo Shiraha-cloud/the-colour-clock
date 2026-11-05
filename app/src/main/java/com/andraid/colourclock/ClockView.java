@@ -59,6 +59,9 @@ public class ClockView extends View {
 
     private static final String URL_DESIGNER = "https://www.designwithjack.com";
     private static final String URL_FONT = "https://cotypefoundry.com/our-fonts/aeonik-mono/";
+    // Chinese line-breaking rules: these marks may not open a line, nor these close one.
+    static final String NO_LINE_START = "，。、；：！？）》」』】〉”’…—～·";
+    static final String NO_LINE_END = "（《「【〈“’";
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable ticker = new Runnable() {
@@ -522,7 +525,7 @@ public class ClockView extends View {
      * Hand-rolled word wrap. StaticLayout would do this, but its alignment constants
      * were renamed after API 14 and the old ones are gone from the current stubs.
      */
-    private static String[] wrap(TextPaint paint, String text, int width) {
+    static String[] wrap(TextPaint paint, String text, int width) {
         ArrayList<String> lines = new ArrayList<String>();
         int start = 0;
         int end = text.length();
@@ -538,6 +541,7 @@ public class ClockView extends View {
                     stop = space;
                 }
             }
+            stop = avoidLeadingMark(text, start, stop, end);
             lines.add(text.substring(start, stop).trim());
             start = stop;
             while (start < end && text.charAt(start) == ' ') {
@@ -545,6 +549,21 @@ public class ClockView extends View {
             }
         }
         return lines.toArray(new String[lines.size()]);
+    }
+
+    /**
+     * CJK has no spaces to break on, so the plain fit would happily start a line with a full
+     * stop. A mark that cannot open a line is pulled onto the previous one, and one that cannot
+     * close it is pushed to the next, even though each costs a little width.
+     */
+    private static int avoidLeadingMark(String text, int start, int stop, int end) {
+        if (stop < end && NO_LINE_START.indexOf(text.charAt(stop)) >= 0) {
+            return stop + 1;
+        }
+        if (stop > start + 1 && NO_LINE_END.indexOf(text.charAt(stop - 1)) >= 0) {
+            return stop - 1;
+        }
+        return stop;
     }
 
     private static float blockHeight(String[] lines, Paint paint, float mult, Paint.FontMetrics metrics) {

@@ -1,6 +1,7 @@
 package com.andraid.colourclock;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.robolectric.Shadows.shadowOf;
 
@@ -10,6 +11,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.text.TextPaint;
 import android.view.MotionEvent;
 import android.view.View;
 
@@ -195,6 +197,34 @@ public class ClockViewRenderTest {
         assertTrue("copy overruns the panel bottom: last row " + last + " of " + limit,
                 last > 0 && last < limit);
         save(f.bitmap);
+    }
+
+    /**
+     * The about copy is Chinese now, and CJK has no spaces to break on. A plain fit happily
+     * starts a line with a full stop, which reads as broken typography on any handset.
+     */
+    @Test
+    @Config(qualifiers = "w411dp-h914dp-port-notnight-420dpi")
+    public void chineseCopyRespectsLineBreakRules() throws Exception {
+        TextPaint paint = new TextPaint();
+        paint.setTextSize(dp(22f));
+        String body = RuntimeEnvironment.getApplication().getString(R.string.about_body);
+        String[] lines = ClockView.wrap(paint, body, Math.round(dp(300f)));
+        assertTrue("copy actually wrapped (" + lines.length + " lines)", lines.length > 3);
+        for (String line : lines) {
+            assertFalse("line opens with a closing mark: " + line,
+                    ClockView.NO_LINE_START.indexOf(line.charAt(0)) >= 0);
+            assertFalse("line ends with an opening mark: " + line,
+                    ClockView.NO_LINE_END.indexOf(line.charAt(line.length() - 1)) >= 0);
+            assertTrue("empty line: [" + line + "]", line.length() > 0);
+        }
+        StringBuilder joined = new StringBuilder();
+        for (String line : lines) {
+            joined.append(line);
+        }
+        // Line-break spaces disappear by design; nothing else may.
+        assertEquals("no character lost while wrapping", body.replace(" ", ""),
+                joined.toString().replace(" ", ""));
     }
 
     // ---------------------------------------------------------------- fixtures
