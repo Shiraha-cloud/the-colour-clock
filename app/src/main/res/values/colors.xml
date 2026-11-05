@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Page background behind the colour card: light theme white, night theme black,
+         mirroring the site prefers-color-scheme rules. -->
+    <color name="page">#FFFFFFFF</color>
+</resources>

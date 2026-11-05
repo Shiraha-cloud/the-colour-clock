@@ -1,0 +1,61 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.andraid.colourclock'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.andraid.colourclock'
+        // Android 4.0 Ice Cream Sandwich -> Android 16
+        minSdk 14
+        targetSdk 36
+        // https://semver.org: versionName is MAJOR.MINOR.PATCH (breaking / feature / fix),
+        // versionCode only ever goes up, by 1, for every release built on top of this one.
+        versionCode 1
+        versionName '1.0.0'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.debug
+        }
+        debug {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    // Framework-only app: no AndroidX, so nothing here needs the test/debug libraries.
+    lint {
+        abortOnError false
+        disable 'UnusedAttribute', 'ScrollViewCount', 'OldTargetApi'
+    }
+
+    testOptions {
+        unitTests {
+            includeAndroidResources = true
+            all {
+                // Robolectric fetches its android-all jar itself; keep it on the fast mirror.
+                systemProperty 'robolectric.dependency.repo.url', 'https://maven.aliyun.com/repository/public'
+                systemProperty 'robolectric.dependency.repo.id', 'aliyunPublic'
+                maxHeapSize = '1024m'
+            }
+        }
+    }
+}
+
+dependencies {
+    // Test-only: renders ClockView off-screen on the JVM so the draw path can be checked
+    // without a device. Never packaged into the APK.
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.17'
+}

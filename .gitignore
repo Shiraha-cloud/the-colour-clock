@@ -1,0 +1,9 @@
+# Build outputs — the APKs are artifacts, rebuild them from source with the README commands.
+build/
+.gradle/
+local.properties
+
+# Android Studio
+.idea/
+*.iml
+.DS_Store

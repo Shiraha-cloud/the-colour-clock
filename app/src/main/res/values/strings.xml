@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Colour Clock</string>
+
+    <string name="brand">The Colour Clock</string>
+    <string name="mode_time">TIME</string>
+    <string name="mode_colour">COLOUR</string>
+
+    <string name="about_heading">Time as a hexadecimal colour</string>
+    <string name="about_body">The Colour Clock transforms time into a sublime spectrum of colours. This is a native Android rendering of thecolourclock.com, the experimental project by digital product designer Jack Hughes.</string>
+    <string name="about_credit">designwithjack.com</string>
+    <string name="about_font">Original typeface is Aeonik Mono by CoType. This build uses the system monospace face.</string>
+    <string name="about_made">Time follows your device clock, including time zone and daylight saving changes.</string>
+</resources>
