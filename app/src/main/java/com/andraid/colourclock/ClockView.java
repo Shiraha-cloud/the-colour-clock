@@ -38,12 +38,20 @@ public class ClockView extends View {
 
     static final String PREFS = "colour_clock";
     static final String PREF_MODE = "mode";
+    static final String PREF_SCALE = "readout_scale";
+
+    /** The readout is drawn at 17.5vmin; this setting multiplies that before the fit clamps. */
+    static final int SCALE_MIN = 40;
+    static final int SCALE_MAX = 160;
+    static final int SCALE_STEP = 5;
+    static final int SCALE_DEFAULT = 100;
 
     /** The last hex digit steps every 62.5 ms, so a 60 ms poll never skips a colour. */
     private static final long TICK_IDLE_MS = 60;
     private static final long TICK_ANIM_MS = 16;
     private static final long ABOUT_MS = 400;
     private static final long SWAP_MS = 450;
+    private static final long SIZE_MS = 260;
 
     private static final int WIDE_BREAKPOINT_DP = 800;
     private static final int ABOUT_BAR_DP = 80;
@@ -56,6 +64,8 @@ public class ClockView extends View {
     private static final int HIT_READOUT = 4;
     private static final int HIT_CREDIT = 5;
     private static final int HIT_FONT = 6;
+    private static final int HIT_SIZE = 7;
+    private static final int HIT_SLIDER = 8;
 
     private static final String URL_DESIGNER = "https://www.designwithjack.com";
     private static final String URL_FONT = "https://cotypefoundry.com/our-fonts/aeonik-mono/";
@@ -80,6 +90,7 @@ public class ClockView extends View {
     private final TextPaint brandPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final TextPaint readoutPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final TextPaint pillPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private final TextPaint sizePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final TextPaint headingPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final TextPaint bodyPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final TextPaint captionPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
@@ -89,6 +100,8 @@ public class ClockView extends View {
     private final RectF cardRect = new RectF();
     private final RectF contentRect = new RectF();
     private final RectF infoRect = new RectF();
+    private final RectF sizeRect = new RectF();
+    private final RectF sliderRect = new RectF();
     private final RectF timeRect = new RectF();
     private final RectF colourRect = new RectF();
     private final RectF creditRect = new RectF();
@@ -105,6 +118,7 @@ public class ClockView extends View {
     private int mode = MODE_TIME;
     private int prevMode = MODE_TIME;
     private int pressed = HIT_NONE;
+    private int scalePercent = SCALE_DEFAULT;
 
     private boolean night;
     private boolean wide;
@@ -123,6 +137,9 @@ public class ClockView extends View {
     private float swapProgress = 1f;
     private long aboutStart = -1L;
     private float aboutFrom, aboutTo, aboutProgress;
+    private long sizeStart = -1L;
+    private float sizeFrom, sizeTo, sizeProgress;
+    private boolean draggingScale;
 
     private int safeL, safeT, safeR, safeB;
 
@@ -131,6 +148,7 @@ public class ClockView extends View {
     private float aboutPad, aboutGap, headingTracking;
     private float contentLeft, contentTop, contentRight, contentBottom;
     private float brandMid, pillMid;
+    private float trackLeft, trackRight, trackY;
     private int aboutWidth;
     private Shader pillShader;
 
@@ -142,11 +160,14 @@ public class ClockView extends View {
 
         night = (context.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
                 == Configuration.UI_MODE_NIGHT_YES;
+        scalePercent = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getInt(PREF_SCALE, SCALE_DEFAULT);
 
         Typeface mono = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL);
         brandPaint.setTypeface(mono);
         readoutPaint.setTypeface(mono);
         pillPaint.setTypeface(mono);
+        sizePaint.setTypeface(mono);
         headingPaint.setTypeface(mono);
         bodyPaint.setTypeface(mono);
         captionPaint.setTypeface(mono);
@@ -191,6 +212,15 @@ public class ClockView extends View {
 
     public int getMode() {
         return mode;
+    }
+
+    /** Readout size as a percentage of the site's 17.5vmin; the fit clamps still have the last word. */
+    public int getTextScale() {
+        return scalePercent;
+    }
+
+    public void setTextScale(int percent) {
+        setScale(percent, true);
     }
 
     public void startTicking() {
@@ -244,7 +274,7 @@ public class ClockView extends View {
             return;
         }
         boolean changed = readClock();
-        boolean animating = stepSwap() | stepAbout();
+        boolean animating = stepSwap() | stepAbout() | stepSize();
         if (changed | animating) {
             invalidate();
         }
@@ -320,11 +350,75 @@ public class ClockView extends View {
         return true;
     }
 
-    private void toggleAbout() {
+    private boolean stepSize() {
+        if (sizeStart < 0L) {
+            return false;
+        }
+        float p = (SystemClock.uptimeMillis() - sizeStart) / (float) SIZE_MS;
+        if (p >= 1f) {
+            sizeStart = -1L;
+            sizeProgress = sizeTo;
+            return false;
+        }
+        float eased = 1f - (1f - p) * (1f - p) * (1f - p);
+        sizeProgress = sizeFrom + (sizeTo - sizeFrom) * eased;
+        return true;
+    }
+
+    private void setAboutPanel(boolean open) {
+        if ((aboutTo > 0.5f) == open) {
+            return;
+        }
         aboutFrom = aboutProgress;
-        aboutTo = aboutTo > 0.5f ? 0f : 1f;
+        aboutTo = open ? 1f : 0f;
         aboutStart = SystemClock.uptimeMillis();
         wake();
+    }
+
+    private void setSizePanel(boolean open) {
+        if ((sizeTo > 0.5f) == open) {
+            return;
+        }
+        sizeFrom = sizeProgress;
+        sizeTo = open ? 1f : 0f;
+        sizeStart = SystemClock.uptimeMillis();
+        wake();
+    }
+
+    /** Both panels take over the whole screen, so opening one always puts the other away. */
+    private void togglePanel(int which) {
+        boolean about = which == HIT_INFO;
+        boolean open = (about ? aboutTo : sizeTo) <= 0.5f;
+        if (about) {
+            setAboutPanel(open);
+            setSizePanel(false);
+        } else {
+            setSizePanel(open);
+            setAboutPanel(false);
+        }
+    }
+
+    private void setScale(int percent, boolean persist) {
+        int wanted = clamp(percent, SCALE_MIN, SCALE_MAX);
+        if (wanted == scalePercent) {
+            return;
+        }
+        scalePercent = wanted;
+        if (persist) {
+            storeScale();
+        }
+        layoutReadout();
+        invalidate();
+    }
+
+    /** Drag position on the track, snapped so the value lands on whole steps instead of 97%. */
+    private void applyDrag(float x) {
+        if (trackRight <= trackLeft) {
+            return;
+        }
+        float ratio = clamp((x - trackLeft) / (trackRight - trackLeft), 0f, 1f);
+        int steps = Math.round(ratio * (SCALE_MAX - SCALE_MIN) / SCALE_STEP);
+        setScale(SCALE_MIN + steps * SCALE_STEP, false);
     }
 
     // ---------------------------------------------------------------- colour
@@ -345,6 +439,11 @@ public class ClockView extends View {
     private void storeMode() {
         SharedPreferences prefs = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         prefs.edit().putInt(PREF_MODE, mode).apply();
+    }
+
+    private void storeScale() {
+        SharedPreferences prefs = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        prefs.edit().putInt(PREF_SCALE, scalePercent).apply();
     }
 
     static float luminance(int colour) {
@@ -387,6 +486,10 @@ public class ClockView extends View {
         return value < min ? min : (value > max ? max : value);
     }
 
+    private static int clamp(int value, int min, int max) {
+        return value < min ? min : (value > max ? max : value);
+    }
+
     private float dp(float value) {
         return TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value, getResources().getDisplayMetrics());
     }
@@ -424,7 +527,6 @@ public class ClockView extends View {
         contentBottom = h - outer - safeB;
         contentRect.set(contentLeft, contentTop, contentRight, contentBottom);
         float contentW = contentRight - contentLeft;
-        float contentH = contentBottom - contentTop;
 
         brandPaint.setTextSize(dp(16f));
         pillPaint.setTextSize(dp(14f));
@@ -432,20 +534,6 @@ public class ClockView extends View {
         brandMid = (fm.ascent + fm.descent) / 2f;
         pillPaint.getFontMetrics(fm);
         pillMid = (fm.ascent + fm.descent) / 2f;
-
-        // 17.5vmin, then reduced until the widest readout fits inside the card.
-        readoutSize = Math.min(w, h) * 0.175f;
-        readoutPaint.setTextSize(100f);
-        float widthAt100 = trackedWidth(readoutPaint, "00:00:00", -2.5f);
-        readoutSize = Math.min(readoutSize, (contentW - headerPad * 2f) / widthAt100 * 100f);
-
-        float bandTop = contentTop + headerPad * 2f + infoSize;
-        float bandBottom = contentBottom - pillBottom - pillHeight;
-        readoutSize = Math.min(readoutSize, Math.max(bandBottom - bandTop, dp(24f)) * 0.55f);
-        readoutPaint.setTextSize(readoutSize);
-        readoutBaseline = (bandTop + bandBottom) / 2f
-                - (readoutPaint.ascent() + readoutPaint.descent()) / 2f;
-        readoutRect.set(contentLeft, bandTop, contentRight, bandBottom);
 
         float timePillW = pillWidth(timeLabel);
         float colourPillW = pillWidth(colourLabel);
@@ -456,6 +544,11 @@ public class ClockView extends View {
 
         infoRect.set(contentRight - headerPad - infoSize, contentTop + headerPad,
                 contentRight - headerPad, contentTop + headerPad + infoSize);
+        float iconGap = dp(12f);
+        sizeRect.set(infoRect.left - iconGap - infoSize, infoRect.top,
+                infoRect.left - iconGap, infoRect.bottom);
+
+        layoutReadout();
 
         double radians = Math.toRadians(205);
         float dx = (float) Math.sin(radians);
@@ -489,6 +582,43 @@ public class ClockView extends View {
             }
             scale *= aboutRoom / need;
         }
+    }
+
+    /**
+     * The readout and the size slider live in the same band, so they are laid out together: the
+     * site's 17.5vmin is multiplied by the saved scale, and the two clamps after that are what
+     * keep the string from ever being cut by the screen edge or crowded by the pill row. The
+     * slider geometry is recomputed here as well, because dragging must not re-wrap the copy.
+     */
+    private void layoutReadout() {
+        float contentW = contentRight - contentLeft;
+        float bandTop = contentTop + headerPad * 2f + infoSize;
+        float bandBottom = contentBottom - pillBottom - pillHeight;
+
+        readoutPaint.setTextSize(100f);
+        float widthAt100 = trackedWidth(readoutPaint, "00:00:00", -2.5f);
+        float fit = Math.min((contentW - headerPad * 2f) / widthAt100 * 100f,
+                Math.max(bandBottom - bandTop, dp(24f)) * 0.55f);
+        readoutSize = clamp(Math.min(getWidth(), getHeight()) * 0.175f * scalePercent / 100f,
+                dp(16f), fit);
+        readoutPaint.setTextSize(readoutSize);
+        readoutBaseline = (bandTop + bandBottom) / 2f
+                - (readoutPaint.ascent() + readoutPaint.descent()) / 2f;
+        readoutRect.set(contentLeft, bandTop, contentRight, bandBottom);
+
+        // Room at both ends so the thumb can sit on the very last tick without burying its A.
+        float marker = dp(44f);
+        trackLeft = contentLeft + headerPad + marker;
+        trackRight = contentRight - headerPad - marker;
+        trackY = bandBottom - pillBottom - dp(18f);
+        // Less room asked for above the track than below: at the largest scale the readout
+        // reaches down close to the strip, and its digits must stay tappable to switch modes.
+        sliderRect.set(contentLeft, trackY - dp(20f), contentRight, trackY + dp(30f));
+    }
+
+    private float trackFor(int percent) {
+        return trackLeft + (trackRight - trackLeft) * (percent - SCALE_MIN)
+                / (float) (SCALE_MAX - SCALE_MIN);
     }
 
     /** Heading, body, captions and credit scale together so the block keeps its proportions. */
@@ -619,12 +749,16 @@ public class ClockView extends View {
         canvas.drawRect(cardRect, overlayPaint);
 
         drawBrand(canvas, contentRect);
+        drawSizeButton(canvas);
         drawInfo(canvas);
 
         float content = 1f - open;
         if (content > 0.01f) {
             drawReadout(canvas, content);
             drawPills(canvas, content);
+            if (sizeProgress > 0.01f) {
+                drawSizeSlider(canvas, sizeProgress * content);
+            }
         }
         canvas.restoreToCount(clip);
 
@@ -642,7 +776,7 @@ public class ClockView extends View {
 
         float gap = wide ? dp(32f) : dp(20f);
         float lineLeft = end + gap;
-        float lineRight = infoRect.left - gap;
+        float lineRight = sizeRect.left - gap;
         if (lineRight - lineLeft > dp(60f)) {
             strokePaint.setColor(pageBackground);
             strokePaint.setAlpha(102);
@@ -680,6 +814,64 @@ public class ClockView extends View {
         }
         strokePaint.setStrokeCap(Paint.Cap.BUTT);
         canvas.restoreToCount(layer);
+    }
+
+    /** The size toggle is the info disc's sibling: same wash, same ink, an "A" instead of an "i". */
+    private void drawSizeButton(Canvas canvas) {
+        float cx = sizeRect.centerX();
+        float cy = sizeRect.centerY();
+        int fill = (night ? 0x1F : 0x28) + Math.round(0x24 * sizeProgress);
+        solidPaint.setShader(null);
+        solidPaint.setColor((fill << 24) | 0x00FFFFFF);
+        canvas.drawCircle(cx, cy, infoSize / 2f, solidPaint);
+        drawGlyphCentred(canvas, "A", cx, cy, dp(17f), cardInk, 255);
+    }
+
+    private void drawSizeSlider(Canvas canvas, float amount) {
+        float thumb = trackFor(scalePercent);
+
+        strokePaint.setStrokeCap(Paint.Cap.ROUND);
+        strokePaint.setStrokeWidth(dp(2f));
+        strokePaint.setColor(cardInk);
+        strokePaint.setAlpha(Math.round(80 * amount));
+        canvas.drawLine(trackLeft, trackY, trackRight, trackY, strokePaint);
+        strokePaint.setAlpha(Math.round(180 * amount));
+        canvas.drawLine(trackLeft, trackY, thumb, trackY, strokePaint);
+
+        // One tick every 20%, so the middle one marks the untouched 17.5vmin the site ships with.
+        strokePaint.setStrokeWidth(dp(1.5f));
+        strokePaint.setAlpha(Math.round(110 * amount));
+        for (int percent = SCALE_MIN; percent <= SCALE_MAX; percent += 20) {
+            float x = trackFor(percent);
+            canvas.drawLine(x, trackY - dp(7f), x, trackY + dp(7f), strokePaint);
+        }
+        strokePaint.setStrokeCap(Paint.Cap.BUTT);
+
+        solidPaint.setShader(null);
+        solidPaint.setColor(cardInk);
+        solidPaint.setAlpha(Math.round(255 * amount));
+        canvas.drawCircle(thumb, trackY, dp(10f), solidPaint);
+
+        // The two A are the legend; the number under the track is what the drag actually picked.
+        drawGlyphCentred(canvas, "A", trackLeft - dp(24f), trackY, dp(11f), cardInk, Math.round(200 * amount));
+        drawGlyphCentred(canvas, "A", trackRight + dp(24f), trackY, dp(19f), cardInk, Math.round(200 * amount));
+        sizePaint.setTextSize(dp(13f));
+        sizePaint.setColor(cardInk);
+        sizePaint.setAlpha(Math.round(150 * amount));
+        String label = scalePercent + "%";
+        sizePaint.getFontMetrics(fm);
+        canvas.drawText(label, (trackLeft + trackRight) / 2f - sizePaint.measureText(label) / 2f,
+                trackY + dp(30f) - (fm.ascent + fm.descent) / 2f, sizePaint);
+    }
+
+    private void drawGlyphCentred(Canvas canvas, String text, float centerX, float centerY,
+                                  float size, int colour, int alpha) {
+        sizePaint.setTextSize(size);
+        sizePaint.setColor(colour);
+        sizePaint.setAlpha(alpha);
+        sizePaint.getFontMetrics(fm);
+        canvas.drawText(text, centerX - sizePaint.measureText(text) / 2f,
+                centerY - (fm.ascent + fm.descent) / 2f, sizePaint);
     }
 
     private void drawReadout(Canvas canvas, float contentAlpha) {
@@ -861,12 +1053,22 @@ public class ClockView extends View {
         if (action == MotionEvent.ACTION_DOWN) {
             pressed = hitTest(x, y);
             if (pressed != HIT_NONE) {
+                if (pressed == HIT_SLIDER) {
+                    draggingScale = true;
+                    applyDrag(x);
+                }
                 invalidate();
                 return true;
             }
             return false;
         }
         if (action == MotionEvent.ACTION_MOVE) {
+            if (draggingScale) {
+                // The finger may leave the strip mid-drag; keep following it until it lifts.
+                applyDrag(x);
+                invalidate();
+                return true;
+            }
             if (pressed == HIT_NONE) {
                 return false;
             }
@@ -878,6 +1080,13 @@ public class ClockView extends View {
             return true;
         }
         if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            if (draggingScale) {
+                draggingScale = false;
+                pressed = HIT_NONE;
+                storeScale();
+                invalidate();
+                return true;
+            }
             int was = pressed;
             pressed = HIT_NONE;
             invalidate();
@@ -894,11 +1103,19 @@ public class ClockView extends View {
         if (infoRect.contains(x, y)) {
             return HIT_INFO;
         }
+        if (sizeRect.contains(x, y)) {
+            return HIT_SIZE;
+        }
         if (aboutProgress > 0.5f) {
             if (creditRect.contains(x, y)) {
                 return HIT_CREDIT;
             }
             return fontRect.contains(x, y) ? HIT_FONT : HIT_NONE;
+        }
+        // The strip sits inside the readout band, so it has to be asked first or the tap
+        // would switch modes instead of dragging.
+        if (sizeProgress > 0.5f && sliderRect.contains(x, y)) {
+            return HIT_SLIDER;
         }
         if (timeRect.contains(x, y)) {
             return HIT_TIME;
@@ -912,7 +1129,10 @@ public class ClockView extends View {
     private void handleTap(int hit) {
         switch (hit) {
             case HIT_INFO:
-                toggleAbout();
+                togglePanel(HIT_INFO);
+                break;
+            case HIT_SIZE:
+                togglePanel(HIT_SIZE);
                 break;
             case HIT_TIME:
                 setMode(MODE_TIME);

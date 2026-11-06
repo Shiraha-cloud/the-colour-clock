@@ -13,8 +13,8 @@ android {
         targetSdk 36
         // https://semver.org: versionName is MAJOR.MINOR.PATCH (breaking / feature / fix),
         // versionCode only ever goes up, by 1, for every release built on top of this one.
-        versionCode 2
-        versionName '1.0.1'
+        versionCode 3
+        versionName '1.1.0'
     }
 
     buildTypes {

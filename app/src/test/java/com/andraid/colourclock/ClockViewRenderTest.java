@@ -227,6 +227,133 @@ public class ClockViewRenderTest {
                 joined.toString().replace(" ", ""));
     }
 
+    /**
+     * The size control is the second header disc. Its strip has to open and close on the same
+     * tap, drag the readout between SCALE_MIN and SCALE_MAX, and survive the next start-up.
+     */
+    @Test
+    @Config(qualifiers = "w411dp-h914dp-port-notnight-420dpi")
+    public void sliderResizesTheReadoutAndStaysRemembered() throws Exception {
+        Fixture f = new Fixture(PORTRAIT_W, PORTRAIT_H, 0xFFFFFFFF, 0);
+        float y = sliderY(PORTRAIT_W, PORTRAIT_H);
+        f.draw();
+        assertEquals(ClockView.SCALE_DEFAULT, f.view.getTextScale());
+        int closed = stripInk(f, y);
+        assertTrue("ink already sits on the strip: " + closed, closed < 20);
+
+        tap(f.view, sizeCentreX(PORTRAIT_W, false), infoCentreY(PORTRAIT_W, 0));
+        f.settle();
+        f.draw();
+        assertTrue("slider did not appear (" + stripInk(f, y) + " ink px)", stripInk(f, y) > 500);
+
+        drag(f.view, sliderLeft(PORTRAIT_W), y, sliderRight(PORTRAIT_W));
+        f.settle();
+        f.draw();
+        assertEquals(ClockView.SCALE_MAX, f.view.getTextScale());
+        save(f.bitmap, "-open-max");
+        // Measured across the band, stopping above the strip so the track is never mistaken
+        // for a glyph: the baseline stays put, so it is the span that grows with the size.
+        int from = Math.round(bandTop(PORTRAIT_W));
+        int to = Math.round(y - dp(30f));
+        int large = readoutSpan(f, from, to);
+
+        drag(f.view, sliderRight(PORTRAIT_W), y, sliderLeft(PORTRAIT_W));
+        f.settle();
+        f.draw();
+        assertEquals(ClockView.SCALE_MIN, f.view.getTextScale());
+        int small = readoutSpan(f, from, to);
+        assertTrue("dragging did not change the glyphs: " + small + " vs " + large,
+                large > small * 3 / 2);
+
+        // The same preference feeds the next view, so the size survives the process.
+        assertEquals("value written through", ClockView.SCALE_MIN, RuntimeEnvironment
+                .getApplication().getSharedPreferences(ClockView.PREFS, Context.MODE_PRIVATE)
+                .getInt(ClockView.PREF_SCALE, ClockView.SCALE_DEFAULT));
+        ClockView again = new ClockView(RuntimeEnvironment.getApplication());
+        assertEquals(ClockView.SCALE_MIN, again.getTextScale());
+
+        tap(f.view, sizeCentreX(PORTRAIT_W, false), infoCentreY(PORTRAIT_W, 0));
+        f.settle();
+        f.draw();
+        assertTrue("slider did not go away (" + stripInk(f, y) + " ink px)", stripInk(f, y) < 20);
+        save(f.bitmap);
+    }
+
+    /**
+     * Asking for the largest size must still leave the string whole: the fit clamps are the last
+     * word, and the readout may not reach down into the strip it is being adjusted with.
+     */
+    @Test
+    @Config(qualifiers = "w411dp-h914dp-port-notnight-420dpi")
+    public void largestScaleStaysInsideTheContent() throws Exception {
+        Fixture f = new Fixture(PORTRAIT_W, PORTRAIT_H, 0xFFFFFFFF, 0);
+        f.view.setTextScale(ClockView.SCALE_MAX);
+        f.settle();
+        f.draw();
+        assertReadoutNotClipped(f);
+
+        float y = sliderY(PORTRAIT_W, PORTRAIT_H);
+        int bottom = readoutBottom(f, Math.round(y));
+        assertTrue("readout reaches the strip: " + bottom + " of " + y, bottom < y - dp(20f));
+        save(f.bitmap);
+    }
+
+    /**
+     * Landscape has vertical room to spare, so the largest scale is really reached there instead
+     * of being cut off by the screen width. The readout still has to stop short of the strip, and
+     * the strip still has to be readable over the widest the digits ever get.
+     */
+    @Test
+    @Config(qualifiers = "w914dp-h411dp-land-notnight-420dpi")
+    public void landscapeLargestScaleClearsTheSlider() throws Exception {
+        Fixture f = new Fixture(LANDSCAPE_W, LANDSCAPE_H, 0xFFFFFFFF, 0);
+        f.view.setTextScale(ClockView.SCALE_MAX);
+        f.settle();
+        f.draw();
+        assertReadoutNotClipped(f);
+
+        float y = sliderY(LANDSCAPE_W, LANDSCAPE_H);
+        int bottom = readoutBottom(f, Math.round(y));
+        assertTrue("readout reaches the strip: " + bottom + " of " + y, bottom < y - dp(20f));
+        assertTrue("the scale did not actually grow the readout: " + bottom, bottom > y - dp(150f));
+
+        // Open the strip over that oversized readout, which is the tightest the layout ever gets.
+        tap(f.view, sizeCentreX(LANDSCAPE_W, true), infoCentreY(LANDSCAPE_W, 0));
+        f.settle();
+        f.draw();
+        assertTrue("no slider in the wide layout (" + stripInk(f, y) + " ink px)",
+                stripInk(f, y) > 500);
+        save(f.bitmap);
+    }
+
+    /** Both panels own the whole screen, so the second one has to put the first away. */
+    @Test
+    @Config(qualifiers = "w411dp-h914dp-port-notnight-420dpi")
+    public void sliderGivesWayToTheAboutPanel() throws Exception {
+        Fixture f = new Fixture(PORTRAIT_W, PORTRAIT_H, 0xFFFFFFFF, 0);
+        tap(f.view, sizeCentreX(PORTRAIT_W, false), infoCentreY(PORTRAIT_W, 0));
+        f.settle();
+        f.draw();
+        float y = sliderY(PORTRAIT_W, PORTRAIT_H);
+        assertTrue("slider missing after its toggle (" + stripInk(f, y) + " ink px)",
+                stripInk(f, y) > 500);
+
+        tap(f.view, infoCentreX(PORTRAIT_W), infoCentreY(PORTRAIT_W, 0));
+        f.settle();
+        f.draw();
+        int below = Math.round(dp(320f));
+        int ink = countNear(f.bitmap, f.ink, 0, below, PORTRAIT_W, PORTRAIT_H, SHADE);
+        assertTrue("about copy did not open (" + ink + " ink px)", ink > 200);
+
+        // Close the panel again: the strip only stays empty if it was really put away, because an
+        // open slider would simply wait there for the about panel to leave.
+        tap(f.view, infoCentreX(PORTRAIT_W), infoCentreY(PORTRAIT_W, 0));
+        f.settle();
+        f.draw();
+        assertTrue("slider survived the about panel: " + stripInk(f, y), stripInk(f, y) < 20);
+        save(f.bitmap);
+    }
+
     // ---------------------------------------------------------------- fixtures
 
     private final class Fixture {
@@ -270,7 +397,7 @@ public class ClockViewRenderTest {
         }
 
         void settle() {
-            // Long enough for the 400ms panel and 450ms swap animations to finish.
+            // Long enough for the 400ms about panel, 260ms slider and 450ms swap to finish.
             for (int i = 0; i < 40; i++) {
                 shadowOf(Looper.getMainLooper()).idleFor(100, TimeUnit.MILLISECONDS);
             }
@@ -300,6 +427,34 @@ public class ClockViewRenderTest {
 
     private static float infoCentreY(int width, int safeTop) {
         return outerPad(width) + safeTop + dp(20f) + dp(40f) / 2f;
+    }
+
+    /** Mirrors layout(): the wide layout gives the header more padding. */
+    private static float headerPad(int width) {
+        return width > dp(800) ? dp(28f) : dp(20f);
+    }
+
+    private static float sizeCentreX(int width, boolean wide) {
+        return infoCentreX(width, wide) - dp(12f) - dp(40f);
+    }
+
+    /** The strip floats above the pill row: band bottom, then the pill gap, then 18dp. */
+    private static float sliderY(int width, int height) {
+        float bandBottom = pillMidY(width, height, 0) - dp(48f) / 2f;
+        return bandBottom - Math.max(height * 0.0575f, dp(14f)) - dp(18f);
+    }
+
+    private static float sliderLeft(int width) {
+        return outerPad(width) + headerPad(width) + dp(44f);
+    }
+
+    /** Mirrors layoutReadout(): the band starts under the header row and ends at the pill row. */
+    private static float bandTop(int width) {
+        return outerPad(width) + headerPad(width) * 2f + dp(40f);
+    }
+
+    private static float sliderRight(int width) {
+        return width - outerPad(width) - headerPad(width) - dp(44f);
     }
 
     /** Mirrors ClockView.shrink(): how much of the width the colour gives up to the panel. */
@@ -413,6 +568,77 @@ public class ClockViewRenderTest {
         view.dispatchTouchEvent(MotionEvent.obtain(now, now, MotionEvent.ACTION_UP, x, y, 0));
     }
 
+    private static void drag(ClockView view, float fromX, float y, float toX) {
+        long now = SystemClock.uptimeMillis();
+        view.dispatchTouchEvent(MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, fromX, y, 0));
+        for (int i = 1; i <= 4; i++) {
+            float x = fromX + (toX - fromX) * i / 4f;
+            view.dispatchTouchEvent(MotionEvent.obtain(now, now + i, MotionEvent.ACTION_MOVE, x, y, 0));
+        }
+        view.dispatchTouchEvent(MotionEvent.obtain(now, now + 5, MotionEvent.ACTION_UP, toX, y, 0));
+    }
+
+    /**
+     * The strip carries nothing until the size panel opens, so ink there is the panel itself.
+     * The track is drawn at a third of full alpha on purpose, which is inside the GLYPH slack
+     * used for solid copy, so this asks for a near-exact match against the card colour instead.
+     */
+    private static int stripInk(Fixture f, float y) {
+        int width = f.view.getWidth();
+        int from = Math.round(sliderLeft(width)) - Math.round(dp(20f));
+        int right = Math.round(sliderRight(width)) + Math.round(dp(20f));
+        int top = Math.round(y - dp(14f));
+        int bottom = Math.round(y + dp(14f));
+        int found = 0;
+        for (int row = top; row < bottom; row++) {
+            for (int x = from; x < right; x++) {
+                if (!close(f.pixel(x, row), f.colour, 16)) {
+                    found++;
+                }
+            }
+        }
+        return found;
+    }
+
+    /** Widest left-to-right span of ink between two rows, which is what the size scale moves. */
+    private static int readoutSpan(Fixture f, int fromRow, int toRow) {
+        int width = f.view.getWidth();
+        float outer = outerPad(width);
+        int from = Math.round(outer) + 4;
+        int right = Math.round(width - outer) - 4;
+        int left = right, found = -1;
+        for (int y = fromRow; y < toRow; y += 2) {
+            for (int x = from; x < right; x++) {
+                if (!close(f.pixel(x, y), f.colour, GLYPH)) {
+                    left = Math.min(left, x);
+                    found = Math.max(found, x);
+                }
+            }
+        }
+        return found - left;
+    }
+
+    /** Lowest row the readout reaches, searched above the strip so the two are never confused. */
+    private static int readoutBottom(Fixture f, int limit) {
+        int width = f.view.getWidth();
+        float outer = outerPad(width);
+        int from = Math.round(outer) + 4;
+        int right = Math.round(width - outer) - 4;
+        int best = -1;
+        for (int y = 0; y < limit; y++) {
+            int found = 0;
+            for (int x = from; x < right; x += 2) {
+                if (!close(f.pixel(x, y), f.colour, GLYPH)) {
+                    found++;
+                }
+            }
+            if (found > 8) {
+                best = y;
+            }
+        }
+        return best;
+    }
+
     private static int countNear(Bitmap bitmap, int colour, int from, int top, int right, int bottom,
                                  int tolerance) {
         int matched = 0;
@@ -449,9 +675,13 @@ public class ClockViewRenderTest {
     }
 
     private void save(Bitmap bitmap) throws Exception {
+        save(bitmap, "");
+    }
+
+    private void save(Bitmap bitmap, String suffix) throws Exception {
         File dir = new File("build/render-check");
         dir.mkdirs();
-        File file = new File(dir, name.getMethodName() + ".png");
+        File file = new File(dir, name.getMethodName() + suffix + ".png");
         FileOutputStream out = new FileOutputStream(file);
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, out);
         out.close();
