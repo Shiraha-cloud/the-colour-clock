@@ -23,13 +23,13 @@
 
 - 取值 40%–160%，步长 5%，默认 100%；100% 就是站点原本的 `17.5vmin`，所以升级后不去动滑杆，读数、颜色、胶囊都和 1.0.1 一样，唯一的变化是表头多出那枚 `A` 圆片（表头的横线相应缩短到它左边）。
 - 倍数作用在两个"防裁切"上限**之前**：`readoutSize = clamp(min(w,h) × 0.175 × pct, 16dp, min(宽度放得下的最大值, 色带高 × 0.55))`。字号因此只会在到达上限后停止变大，永远不会把数字切掉。
-- 现实中的不对称（数字是离屏渲染逐档量出来的）：竖屏下 `17.5vmin` 已经几乎贴着**宽度**上限——默认档 `00:00:00` 横向占 834 px，105% 起就固定在 882 px，所以往上调只有约 6% 的余地，往下可以缩到 40%（333 px）。横屏宽度绰绰有余，上限换成色带高度，而量程顶端 160% 还没碰到它，因此能一路长到 1299 px，是默认的 1.56 倍。这不是 bug，是"永远不裁切"这条保证的代价。
+- 现实中的不对称（数字是离屏渲染逐档量出来的，测试机 1080×2340 px、420dpi）：竖屏下 `17.5vmin` 已经几乎贴着**宽度**上限——默认档 `00:00:00` 横向占 834 px，105% 起就固定在 882 px，所以往上调只有约 6% 的余地，往下可以缩到 40%（333 px）。横屏宽度绰绰有余，上限换成色带高度，而量程顶端 160% 还没碰到它，因此能一路长到 1299 px，是默认的 1.56 倍。这不是 bug，是"永远不裁切"这条保证的代价。
 - 滑杆的点击区落在读数色带内部，所以命中测试先问滑杆、再问胶囊和大字；上下留的余量刻意不对称（上方 20dp、下方 30dp），否则最大字号时数字会压进滑杆的点击区，点大字就变成拖动而不是切模式。
 - 依旧没有新增依赖：滑杆是 `Canvas` 画的，动画是 260 ms 的三次缓出，与 about 面板同一套手写补间，拖动和吸附都在 `onTouchEvent` 里做。
 
 ## 渲染验证
 
-界面用 Robolectric 4.17 在 JVM 上离屏绘制真实 `ClockView`（`GraphicsMode.NATIVE`，像素级）来检查，见 [ClockViewRenderTest.java](app/src/test/java/com/andraid/colourclock/ClockViewRenderTest.java)，12 项全部通过（`gradle testDebugUnitTest`）：
+界面用 Robolectric 4.17 在 JVM 上离屏绘制真实 `ClockView`（`GraphicsMode.NATIVE`，像素级）来检查，见 [ClockViewRenderTest.java](app/src/test/java/com/andraid/colourclock/ClockViewRenderTest.java)，12 项全部通过（`gradle testDebugUnitTest`）。几何只有两组 fixture：1080×2340 px 竖屏与 2340×1080 px 横屏，都是 420dpi（qualifier 写成 411dp×914dp）。
 
 - 竖屏 TIME 模式：颜色顶到屏幕四边四角（无页面色边框）、卡片色 = 当前时刻的十六进制色、大字读数不被裁切；
 - 点 COLOUR 胶囊：模式切换、读数变为 `#rrggbb`，颜色仍顶到四边；
