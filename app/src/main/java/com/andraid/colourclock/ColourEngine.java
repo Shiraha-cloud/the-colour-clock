@@ -1,10 +1,10 @@
 package com.andraid.colourclock;
 
 /**
- * thecolourclock.com maps the wall clock onto six hex digits, each 0..f:
- * hour band / hour fraction, minute band / minute fraction, second band / second
- * fraction. Hours ignore seconds and minutes ignore milliseconds, exactly as the
- * site's clock.js does, so the maths is kept in the same operation order.
+ * The wall clock maps onto six hex digits, each 0..f: hour band / hour fraction,
+ * minute band / minute fraction, second band / second fraction. Hours ignore seconds
+ * and minutes ignore milliseconds. The rounding and flooring order is fixed, because
+ * re-ordering it would shift digits and break the day-long colour sequence.
  */
 public final class ColourEngine {
 

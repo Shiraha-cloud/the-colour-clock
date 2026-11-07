@@ -406,7 +406,7 @@ public class ClockViewRenderTest {
 
     // ---------------------------------------------------------------- geometry
 
-    /** Content is padded this far inside the view; mirrors the site's clamp(1vw, 10px..22px). */
+    /** Content is padded this far inside the view; mirrors the clamp(1vw, 10px..22px) rule. */
     private static float outerPad(int width) {
         return Math.min(dp(22f), Math.max(dp(10f), width * 0.0189f));
     }

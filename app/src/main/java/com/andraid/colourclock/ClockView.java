@@ -29,7 +29,7 @@ import java.util.TimeZone;
 
 /**
  * The whole clock in one View: no view hierarchy, no library, one draw pass per step.
- * Geometry follows thecolourclock.com stylesheet (clamp/vmin values, 800px breakpoint).
+ * Geometry is metric-driven: clamp/vmin style sizes and an 800px wide-layout breakpoint.
  */
 public class ClockView extends View {
 
@@ -214,7 +214,7 @@ public class ClockView extends View {
         return mode;
     }
 
-    /** Readout size as a percentage of the site's 17.5vmin; the fit clamps still have the last word. */
+    /** Readout size as a percentage of the base 17.5vmin; the fit clamps still have the last word. */
     public int getTextScale() {
         return scalePercent;
     }
@@ -428,7 +428,7 @@ public class ClockView extends View {
         hexColour = 0xFF000000 | Integer.parseInt(hex, 16);
         hexLabel = "#" + hex;
         pillBorder = night ? 0x80000000 : 0xCCFFFFFF;
-        // The site draws the clock in the page colour; close to midnight that colour
+        // The clock is drawn in the page colour; close to midnight that colour
         // reaches the card colour, so use the other extreme instead of vanishing.
         cardInk = contrast(pageBackground, hexColour) >= 2.1f
                 ? pageBackground
@@ -586,7 +586,7 @@ public class ClockView extends View {
 
     /**
      * The readout and the size slider live in the same band, so they are laid out together: the
-     * site's 17.5vmin is multiplied by the saved scale, and the two clamps after that are what
+     * readout's 17.5vmin is multiplied by the saved scale, and the two clamps after that are what
      * keep the string from ever being cut by the screen edge or crowded by the pill row. The
      * slider geometry is recomputed here as well, because dragging must not re-wrap the copy.
      */
@@ -838,7 +838,7 @@ public class ClockView extends View {
         strokePaint.setAlpha(Math.round(180 * amount));
         canvas.drawLine(trackLeft, trackY, thumb, trackY, strokePaint);
 
-        // One tick every 20%, so the middle one marks the untouched 17.5vmin the site ships with.
+        // One tick every 20%, so the middle one marks the untouched 17.5vmin default.
         strokePaint.setStrokeWidth(dp(1.5f));
         strokePaint.setAlpha(Math.round(110 * amount));
         for (int percent = SCALE_MIN; percent <= SCALE_MAX; percent += 20) {
