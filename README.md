@@ -85,7 +85,9 @@ Jack Hughes 的颜色算法用的就是 0–23 的小时数，加一个 12 小�
 
 当前 **1.2.1**（`versionCode 5`）。每个版本都在这里打一个 tag，并在 Releases 放对应的 APK。
 
-版本号按 <https://semver.org/> 三段式：不兼容的改动加第一位，新增功能加第二位，只修问题加第三位；`versionCode` 只管能不能覆盖安装，每发一版 +1。
+版本号按 <https://semver.org/> 三段式：不兼容的改动加第一位，新增功能加第二位，只修问题加第三位；`versionCode` 只管能不能覆盖安装，每发一版 +1，一个号只用一次，回滚不会占用新号。
+
+要退回某一版：`git switch --detach v1.2.0` 切到那个 tag，再按下面的方法编译。每个 tag 都是带注释的，里面记了这一版的 `versionCode`、APK 字节数和 sha256；构建时保持 detached，包内嵌的 git revision 才会和 tag 对上。1.1.0 起的 APK 在 Releases 里都有存档，可以直接下载核对；更早的 1.0.0 / 1.0.1 当时没挂资产，只能从 tag 重新构建。
 
 ## 想自己编译
 
