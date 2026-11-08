@@ -37,8 +37,10 @@ public class ClockView extends View {
     public static final int MODE_COLOUR = 1;
 
     /** Where the colour comes from: the time as six hex digits, or the slow ring. */
-    public static final int STYLE_CLOCK = 0;
-    public static final int STYLE_LOOP = 1;
+    public static final int STYLE_HEX = 0;
+    public static final int STYLE_RING = 1;
+    /** The ring is what a phone that has never been touched shows; the six-digit walk is opt-in. */
+    static final int STYLE_DEFAULT = STYLE_RING;
 
     static final String PREFS = "colour_clock";
     static final String PREF_MODE = "mode";
@@ -82,8 +84,8 @@ public class ClockView extends View {
     private static final int HIT_SIZE = 7;
     private static final int HIT_SLIDER = 8;
     private static final int HIT_MENU = 9;
-    private static final int HIT_STYLE_CLOCK = 10;
-    private static final int HIT_STYLE_LOOP = 11;
+    private static final int HIT_STYLE_HEX = 10;
+    private static final int HIT_STYLE_RING = 11;
     private static final int HIT_PERIOD = 12;
     private static final int HIT_BEHIND_MENU = 13;
 
@@ -125,8 +127,8 @@ public class ClockView extends View {
     private final RectF sizeRect = new RectF();
     private final RectF menuDiscRect = new RectF();
     private final RectF menuCardRect = new RectF();
-    private final RectF clockRowRect = new RectF();
-    private final RectF loopRowRect = new RectF();
+    private final RectF ringRowRect = new RectF();
+    private final RectF hexRowRect = new RectF();
     private final RectF periodRect = new RectF();
     private final RectF sliderRect = new RectF();
     private final RectF timeRect = new RectF();
@@ -143,13 +145,13 @@ public class ClockView extends View {
     private String[] bodyLines, fontLines, madeLines;
 
     private String brandText, timeLabel, colourLabel, headingText, bodyText, creditText, fontText, madeText;
-    private String menuHeading, styleClockLabel, styleLoopLabel, periodLabel;
+    private String menuHeading, ringLabel, digitsLabel, periodLabel;
 
     private int mode = MODE_TIME;
     private int prevMode = MODE_TIME;
     private int pressed = HIT_NONE;
     private int scalePercent = SCALE_DEFAULT;
-    private int style = STYLE_CLOCK;
+    private int style = STYLE_DEFAULT;
     private int periodStop = PERIOD_STOP_DEFAULT;
 
     private boolean night;
@@ -196,7 +198,7 @@ public class ClockView extends View {
                 == Configuration.UI_MODE_NIGHT_YES;
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         scalePercent = prefs.getInt(PREF_SCALE, SCALE_DEFAULT);
-        style = prefs.getInt(PREF_STYLE, STYLE_CLOCK);
+        style = prefs.getInt(PREF_STYLE, STYLE_DEFAULT);
         periodStop = stopFor(prefs.getInt(PREF_PERIOD, PERIOD_DEFAULT));
 
         Typeface mono = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL);
@@ -223,8 +225,10 @@ public class ClockView extends View {
         fontText = context.getString(R.string.about_font);
         madeText = context.getString(R.string.about_made);
         menuHeading = context.getString(R.string.menu_heading).toUpperCase(Locale.ROOT);
-        styleClockLabel = context.getString(R.string.style_colour_clock);
-        styleLoopLabel = context.getString(R.string.style_jack_hughes);
+        // The two names are products, not algorithms: the ring is Colour Clock, and the
+        // six-digit walk is the one that came from Jack Hughes.
+        ringLabel = context.getString(R.string.style_colour_clock);
+        digitsLabel = context.getString(R.string.style_jack_hughes);
         periodLabel = context.getString(R.string.menu_period).toUpperCase(Locale.ROOT);
 
         refreshPalette();
@@ -234,7 +238,7 @@ public class ClockView extends View {
 
     /** Startup path: no crossfade from the default mode, just show what was saved. */
     public void restoreMode(int savedMode) {
-        mode = style == STYLE_LOOP ? MODE_TIME : savedMode;
+        mode = style == STYLE_RING ? MODE_TIME : savedMode;
         prevMode = mode;
         swapProgress = 1f;
         swapStart = -1L;
@@ -265,7 +269,7 @@ public class ClockView extends View {
             return;
         }
         style = newStyle;
-        if (newStyle == STYLE_LOOP) {
+        if (newStyle == STYLE_RING) {
             // The ring has no hex to show, so the readout goes back to the time and stays there.
             setMode(MODE_TIME);
         }
@@ -394,7 +398,7 @@ public class ClockView extends View {
             timeString = new String(timeChars);
         }
 
-        String next = style == STYLE_LOOP
+        String next = style == STYLE_RING
                 ? ColourLoop.hexAt(System.currentTimeMillis(), getPeriodMinutes())
                 : ColourEngine.hex(hours, minutes, seconds, millis);
         if (!next.equals(hex)) {
@@ -765,11 +769,11 @@ public class ClockView extends View {
 
         menuHeadingY = menuCardRect.top + pad + dp(10f);
         float y = menuHeadingY + dp(11f);
-        clockRowRect.set(menuCardRect.left, y, menuCardRect.right, y + row);
-        loopRowRect.set(menuCardRect.left, clockRowRect.bottom, menuCardRect.right,
-                clockRowRect.bottom + row);
+        ringRowRect.set(menuCardRect.left, y, menuCardRect.right, y + row);
+        hexRowRect.set(menuCardRect.left, ringRowRect.bottom, menuCardRect.right,
+                ringRowRect.bottom + row);
 
-        y = loopRowRect.bottom + dp(8f);
+        y = hexRowRect.bottom + dp(8f);
         periodLabelY = y + dp(12f);
         periodLeft = menuCardRect.left + pad;
         periodRight = menuCardRect.right - pad;
@@ -956,7 +960,7 @@ public class ClockView extends View {
         if (content > 0.01f) {
             drawReadout(canvas, content);
             // The ring has no time-as-hex to choose between, so its row of pills goes away.
-            if (style == STYLE_CLOCK) {
+            if (style == STYLE_HEX) {
                 drawPills(canvas, content);
             }
             if (sizePanel.value() > 0.01f) {
@@ -1078,12 +1082,12 @@ public class ClockView extends View {
         labelPaint.setAlpha(Math.round(120 * amount));
         drawTracked(canvas, menuHeading, left, menuHeadingY + dy, labelPaint, dp(3f));
 
-        drawModeRow(canvas, clockRowRect, styleClockLabel, style == STYLE_CLOCK, HIT_STYLE_CLOCK,
+        drawModeRow(canvas, ringRowRect, ringLabel, style == STYLE_RING, HIT_STYLE_RING,
                 left, dy, amount);
-        drawModeRow(canvas, loopRowRect, styleLoopLabel, style == STYLE_LOOP, HIT_STYLE_LOOP,
+        drawModeRow(canvas, hexRowRect, digitsLabel, style == STYLE_HEX, HIT_STYLE_HEX,
                 left, dy, amount);
         // A period that is not in use still answers a drag, it just asks for less attention.
-        drawPeriodTrack(canvas, dy, amount * (style == STYLE_LOOP ? 1f : 0.45f));
+        drawPeriodTrack(canvas, dy, amount * (style == STYLE_RING ? 1f : 0.45f));
     }
 
     private void drawModeRow(Canvas canvas, RectF row, String label, boolean selected, int hit,
@@ -1395,7 +1399,7 @@ public class ClockView extends View {
                     applyScaleDrag(x);
                 } else if (pressed == HIT_PERIOD) {
                     // Grabbing the track is the clearest possible way of asking for the ring.
-                    setStyle(STYLE_LOOP);
+                    setStyle(STYLE_RING);
                     draggingPeriod = true;
                     applyPeriodDrag(x);
                 }
@@ -1465,11 +1469,11 @@ public class ClockView extends View {
         if (menuPanel.value() > 0.5f) {
             // The card floats above the clock, so it is asked first; anything it does not
             // cover closes it instead of reaching through to the readout underneath.
-            if (clockRowRect.contains(x, y)) {
-                return HIT_STYLE_CLOCK;
+            if (ringRowRect.contains(x, y)) {
+                return HIT_STYLE_RING;
             }
-            if (loopRowRect.contains(x, y)) {
-                return HIT_STYLE_LOOP;
+            if (hexRowRect.contains(x, y)) {
+                return HIT_STYLE_HEX;
             }
             if (periodRect.contains(x, y)) {
                 return HIT_PERIOD;
@@ -1487,7 +1491,7 @@ public class ClockView extends View {
         if (sizePanel.value() > 0.5f && sliderRect.contains(x, y)) {
             return HIT_SLIDER;
         }
-        if (style == STYLE_LOOP) {
+        if (style == STYLE_RING) {
             return HIT_NONE;
         }
         if (timeRect.contains(x, y)) {
@@ -1510,11 +1514,11 @@ public class ClockView extends View {
                 menuPanel.setOpen(false);
                 wake();
                 break;
-            case HIT_STYLE_CLOCK:
-                setStyleAndClose(STYLE_CLOCK);
+            case HIT_STYLE_HEX:
+                setStyleAndClose(STYLE_HEX);
                 break;
-            case HIT_STYLE_LOOP:
-                setStyleAndClose(STYLE_LOOP);
+            case HIT_STYLE_RING:
+                setStyleAndClose(STYLE_RING);
                 break;
             case HIT_TIME:
                 setMode(MODE_TIME);

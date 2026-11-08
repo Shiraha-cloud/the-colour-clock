@@ -358,6 +358,29 @@ public class ClockViewRenderTest {
     }
 
     /**
+     * A phone that has never been configured opens on the ring, which is the mode the app is
+     * named after, on the default lap, and without the two capsules. Nothing else in this file
+     * may assume that, because the other fixtures start from the six-digit walk on purpose.
+     */
+    @Test
+    @Config(qualifiers = "w411dp-h914dp-port-notnight-420dpi")
+    public void theRingIsWhatStartsUp() throws Exception {
+        Fixture f = new Fixture(PORTRAIT_W, PORTRAIT_H, 0xFFFFFFFF, 0, -1);
+        assertEquals(ClockView.STYLE_RING, f.view.getStyle());
+        assertEquals(ClockView.PERIOD_DEFAULT, f.view.getPeriodMinutes());
+
+        // Even a saved hex reading is dropped: the ring has no colour code to show.
+        f.view.restoreMode(ClockView.MODE_COLOUR);
+        assertEquals(ClockView.MODE_TIME, f.view.getMode());
+
+        f.draw();
+        assertTrue("capsules survived the ring: " + pillInk(f), pillInk(f) < 60);
+        assertColourReachesEveryEdge(f);
+        assertReadoutNotClipped(f);
+        save(f.bitmap);
+    }
+
+    /**
      * The third disc opens a card of its own, floating over the clock instead of pushing it
      * away like the about panel does. It is opaque, so its box stops showing the clock colour
      * the moment it is up, and nothing else on the screen may move.
@@ -366,7 +389,7 @@ public class ClockViewRenderTest {
     @Config(qualifiers = "w411dp-h914dp-port-notnight-420dpi")
     public void menuDiscOpensTheCard() throws Exception {
         Fixture f = new Fixture(PORTRAIT_W, PORTRAIT_H, 0xFFFFFFFF, 0);
-        assertEquals(ClockView.STYLE_CLOCK, f.view.getStyle());
+        assertEquals(ClockView.STYLE_HEX, f.view.getStyle());
         assertEquals(ClockView.PERIOD_DEFAULT, f.view.getPeriodMinutes());
         assertFalse("menu open at start-up", f.view.isMenuOpen());
 
@@ -383,7 +406,7 @@ public class ClockViewRenderTest {
                 covered > samples * 3 / 4);
         assertTrue(f.view.isMenuOpen());
         assertFalse("the menu opened the slider too", f.view.isSizeOpen());
-        assertEquals("opening the menu changed the mode", ClockView.STYLE_CLOCK, f.view.getStyle());
+        assertEquals("opening the menu changed the mode", ClockView.STYLE_HEX, f.view.getStyle());
         assertTrue("pill row vanished behind the menu", pillInk(f) > 300);
         save(f.bitmap);
     }
@@ -404,10 +427,10 @@ public class ClockViewRenderTest {
         assertTrue("the track ran off the screen", periodTrackY(LANDSCAPE_W, 0) < LANDSCAPE_H - dp(8f));
 
         float rowX = (cardLeft(LANDSCAPE_W) + cardRight(LANDSCAPE_W)) / 2f;
-        tap(f.view, rowX, loopRowY(LANDSCAPE_W, 0));
+        tap(f.view, rowX, ringRowY(LANDSCAPE_W, 0));
         f.settle();
         f.draw();
-        assertEquals(ClockView.STYLE_LOOP, f.view.getStyle());
+        assertEquals(ClockView.STYLE_RING, f.view.getStyle());
         assertFalse("picking a mode left the card open", f.view.isMenuOpen());
         assertColourReachesEveryEdge(f);
         save(f.bitmap);
@@ -429,28 +452,28 @@ public class ClockViewRenderTest {
         f.draw();
         assertFalse("tap outside the card left it open", f.view.isMenuOpen());
         assertTrue("card box still covered", menuCardPixels(f) < cardSamples(f) / 20);
-        assertEquals(ClockView.STYLE_CLOCK, f.view.getStyle());
+        assertEquals(ClockView.STYLE_HEX, f.view.getStyle());
         assertEquals("tap reached through the card", ClockView.MODE_TIME, f.view.getMode());
         save(f.bitmap);
     }
 
     /**
-     * Jack Hughes is the other half of the same menu, so picking it closes the card, and it
-     * takes the two capsules with it: their hex readout means nothing once the colour has
-     * stopped being the time.
+     * The ring is the other half of the same menu, so picking it closes the card, and it takes
+     * the two capsules with it: their hex readout means nothing once the colour has stopped
+     * being the time. Jack Hughes is the row that gives them back.
      */
     @Test
     @Config(qualifiers = "w411dp-h914dp-port-notnight-420dpi")
-    public void loopModeTakesThePillsAway() throws Exception {
+    public void ringTakesThePillsAway() throws Exception {
         Fixture f = new Fixture(PORTRAIT_W, PORTRAIT_H, 0xFFFFFFFF, 0);
         tap(f.view, menuCentreX(PORTRAIT_W, false), infoCentreY(PORTRAIT_W, 0));
         f.settle();
         assertTrue("the hex mode still has its capsules", pillInk(f) > 300);
 
-        tap(f.view, cardRight(PORTRAIT_W) - dp(40f), loopRowY(PORTRAIT_W, 0));
+        tap(f.view, cardRight(PORTRAIT_W) - dp(40f), ringRowY(PORTRAIT_W, 0));
         f.settle();
         f.draw();
-        assertEquals(ClockView.STYLE_LOOP, f.view.getStyle());
+        assertEquals(ClockView.STYLE_RING, f.view.getStyle());
         assertEquals("a ring has no hex to show", ClockView.MODE_TIME, f.view.getMode());
         assertFalse("menu did not close", f.view.isMenuOpen());
         assertTrue("capsules survived the ring: " + pillInk(f), pillInk(f) < 60);
@@ -465,10 +488,10 @@ public class ClockViewRenderTest {
 
         tap(f.view, menuCentreX(PORTRAIT_W, false), infoCentreY(PORTRAIT_W, 0));
         f.settle();
-        tap(f.view, cardRight(PORTRAIT_W) - dp(40f), clockRowY(PORTRAIT_W, 0));
+        tap(f.view, cardRight(PORTRAIT_W) - dp(40f), hexRowY(PORTRAIT_W, 0));
         f.settle();
         f.draw();
-        assertEquals(ClockView.STYLE_CLOCK, f.view.getStyle());
+        assertEquals(ClockView.STYLE_HEX, f.view.getStyle());
         assertTrue("capsules did not come back", pillInk(f) > 300);
         save(f.bitmap, "-back");
     }
@@ -488,7 +511,7 @@ public class ClockViewRenderTest {
         float y = periodTrackY(PORTRAIT_W, 0);
         drag(f.view, periodLeft(PORTRAIT_W), y, periodRight(PORTRAIT_W));
         f.settle();
-        assertEquals(ClockView.STYLE_LOOP, f.view.getStyle());
+        assertEquals(ClockView.STYLE_RING, f.view.getStyle());
         assertEquals("far right is a day", 1440, f.view.getPeriodMinutes());
 
         // A quarter of the way along is the fifth stop, not a quarter of a day.
@@ -564,8 +587,17 @@ public class ClockViewRenderTest {
         }
 
         Fixture(int width, int height, int page, int safeTop) {
+            this(width, height, page, safeTop, ClockView.STYLE_HEX);
+        }
+
+        /** A style of -1 leaves the view in whatever mode an installed app would open in. */
+        Fixture(int width, int height, int page, int safeTop, int style) {
             Context context = RuntimeEnvironment.getApplication();
             view = new ClockView(context);
+            if (style >= 0) {
+                // Almost everything drawn below is the six-digit walk, so start there on purpose.
+                view.setStyle(style);
+            }
             view.setSafeInsets(0, safeTop, 0, 0);
             view.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                     View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY));
@@ -600,7 +632,7 @@ public class ClockViewRenderTest {
         void resync() {
             Calendar now = Calendar.getInstance();
             now.setTimeInMillis(System.currentTimeMillis());
-            String hex = view.getStyle() == ClockView.STYLE_LOOP
+            String hex = view.getStyle() == ClockView.STYLE_RING
                     ? ColourLoop.hexAt(now.getTimeInMillis(), view.getPeriodMinutes())
                     : ColourEngine.hex(now.get(Calendar.HOUR_OF_DAY), now.get(Calendar.MINUTE),
                             now.get(Calendar.SECOND), now.get(Calendar.MILLISECOND));
@@ -665,12 +697,13 @@ public class ClockViewRenderTest {
         return cardTop(width, safeTop) + dp(18f) + dp(10f);
     }
 
-    private static float clockRowY(int width, int safeTop) {
+    /** The first row is the ring, which is also what the app opens on. */
+    private static float ringRowY(int width, int safeTop) {
         return menuHeadingY(width, safeTop) + dp(11f) + dp(44f) / 2f;
     }
 
-    private static float loopRowY(int width, int safeTop) {
-        return clockRowY(width, safeTop) + dp(44f);
+    private static float hexRowY(int width, int safeTop) {
+        return ringRowY(width, safeTop) + dp(44f);
     }
 
     private static float periodTrackY(int width, int safeTop) {
