@@ -6,6 +6,13 @@
     <string name="mode_time">TIME</string>
     <string name="mode_colour">COLOUR</string>
 
+    <string name="menu_heading">MODE</string>
+    <string name="menu_period">PERIOD</string>
+    <string name="style_colour_clock">Colour Clock</string>
+    <string name="style_jack_hughes">Jack Hughes</string>
+    <string name="period_minutes">%1$d 分钟</string>
+    <string name="period_hours">%1$d 小时</string>
+
     <string name="about_heading">Time as a hexadecimal colour</string>
     <string name="about_body">本应用秉持极简与纯粹的离线设计理念，全程无需接入互联网。我们郑重承诺：不采集、不存储、亦不传输任何用户个人信息或设备数据。您的所有操作痕迹与数据，均安全且唯一地留存于您的本地设备之中。本应用未嵌入任何第三方 SDK，以绝对的本地化运行，默默守护您的数字隐私。</string>
     <string name="about_credit">designwithjack.com</string>

@@ -2,6 +2,7 @@ package com.andraid.colourclock;
 
 import android.annotation.TargetApi;
 import android.app.Activity;
+import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.os.Build;
 import android.os.Bundle;
@@ -27,6 +28,7 @@ public class MainActivity extends Activity {
         clock.restoreMode(getSharedPreferences(ClockView.PREFS, MODE_PRIVATE)
                 .getInt(ClockView.PREF_MODE, ClockView.MODE_TIME));
         setContentView(clock);
+        allowReversePortrait();
         allowDisplayCutout();
         installInsets();
         applyImmersive();
@@ -58,6 +60,17 @@ public class MainActivity extends Activity {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
             applyImmersive();
+        }
+    }
+
+    /**
+     * "user" in the manifest is the four-way rotation without reverse portrait, which is why
+     * turning the phone a half turn used to leave the clock upright. FULL_USER adds that quarter
+     * turn from API 18; 4.0 to 4.2 has no equivalent and keeps the manifest value.
+     */
+    private void allowReversePortrait() {
+        if (Build.VERSION.SDK_INT >= 18) {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_USER);
         }
     }
 

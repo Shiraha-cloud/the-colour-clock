@@ -36,9 +36,15 @@ public class ClockView extends View {
     public static final int MODE_TIME = 0;
     public static final int MODE_COLOUR = 1;
 
+    /** Where the colour comes from: the time as six hex digits, or the slow ring. */
+    public static final int STYLE_CLOCK = 0;
+    public static final int STYLE_LOOP = 1;
+
     static final String PREFS = "colour_clock";
     static final String PREF_MODE = "mode";
     static final String PREF_SCALE = "readout_scale";
+    static final String PREF_STYLE = "style";
+    static final String PREF_PERIOD = "period_minutes";
 
     /** The readout is drawn at 17.5vmin; this setting multiplies that before the fit clamps. */
     static final int SCALE_MIN = 40;
@@ -46,16 +52,25 @@ public class ClockView extends View {
     static final int SCALE_STEP = 5;
     static final int SCALE_DEFAULT = 100;
 
-    /** The last hex digit steps every 62.5 ms, so a 60 ms poll never skips a colour. */
+    /** One minute to a day, but only these eighteen, so the drag always lands on a round value. */
+    static final int[] PERIOD_STOPS = {1, 2, 3, 5, 10, 15, 20, 30, 45, 60,
+            90, 120, 180, 240, 360, 480, 720, 1440};
+    static final int PERIOD_DEFAULT = 60;
+    static final int PERIOD_STOP_DEFAULT = 9;
+
+    /** The last hex digit steps every 62.5 ms, so a 60 ms poll never skips a colour.
+     * The ring is continuous, and a minute of it is still 16 steps a second at this rate. */
     private static final long TICK_IDLE_MS = 60;
     private static final long TICK_ANIM_MS = 16;
     private static final long ABOUT_MS = 400;
     private static final long SWAP_MS = 450;
     private static final long SIZE_MS = 260;
+    private static final long MENU_MS = 220;
 
     private static final int WIDE_BREAKPOINT_DP = 800;
     private static final int ABOUT_BAR_DP = 80;
     private static final int ABOUT_TOP_DP = 96;
+    private static final int MENU_WIDTH_DP = 300;
 
     private static final int HIT_NONE = 0;
     private static final int HIT_INFO = 1;
@@ -66,6 +81,11 @@ public class ClockView extends View {
     private static final int HIT_FONT = 6;
     private static final int HIT_SIZE = 7;
     private static final int HIT_SLIDER = 8;
+    private static final int HIT_MENU = 9;
+    private static final int HIT_STYLE_CLOCK = 10;
+    private static final int HIT_STYLE_LOOP = 11;
+    private static final int HIT_PERIOD = 12;
+    private static final int HIT_BEHIND_MENU = 13;
 
     private static final String URL_DESIGNER = "https://www.designwithjack.com";
     private static final String URL_FONT = "https://cotypefoundry.com/our-fonts/aeonik-mono/";
@@ -90,6 +110,8 @@ public class ClockView extends View {
     private final TextPaint brandPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final TextPaint readoutPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final TextPaint pillPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private final TextPaint menuPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private final TextPaint labelPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final TextPaint sizePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final TextPaint headingPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private final TextPaint bodyPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
@@ -101,12 +123,19 @@ public class ClockView extends View {
     private final RectF contentRect = new RectF();
     private final RectF infoRect = new RectF();
     private final RectF sizeRect = new RectF();
+    private final RectF menuDiscRect = new RectF();
+    private final RectF menuCardRect = new RectF();
+    private final RectF clockRowRect = new RectF();
+    private final RectF loopRowRect = new RectF();
+    private final RectF periodRect = new RectF();
     private final RectF sliderRect = new RectF();
     private final RectF timeRect = new RectF();
     private final RectF colourRect = new RectF();
     private final RectF creditRect = new RectF();
     private final RectF fontRect = new RectF();
     private final RectF readoutRect = new RectF();
+    /** Reused by the menu slide so the 16 fps draw pass still allocates nothing. */
+    private final RectF scratchRect = new RectF();
     private final char[] timeChars = "00:00:00".toCharArray();
     /** Reused so the 16 fps draw pass allocates nothing. */
     private final Paint.FontMetrics fm = new Paint.FontMetrics();
@@ -114,11 +143,14 @@ public class ClockView extends View {
     private String[] bodyLines, fontLines, madeLines;
 
     private String brandText, timeLabel, colourLabel, headingText, bodyText, creditText, fontText, madeText;
+    private String menuHeading, styleClockLabel, styleLoopLabel, periodLabel;
 
     private int mode = MODE_TIME;
     private int prevMode = MODE_TIME;
     private int pressed = HIT_NONE;
     private int scalePercent = SCALE_DEFAULT;
+    private int style = STYLE_CLOCK;
+    private int periodStop = PERIOD_STOP_DEFAULT;
 
     private boolean night;
     private boolean wide;
@@ -135,11 +167,11 @@ public class ClockView extends View {
 
     private long swapStart = -1L;
     private float swapProgress = 1f;
-    private long aboutStart = -1L;
-    private float aboutFrom, aboutTo, aboutProgress;
-    private long sizeStart = -1L;
-    private float sizeFrom, sizeTo, sizeProgress;
+    private final Panel aboutPanel = new Panel(ABOUT_MS);
+    private final Panel sizePanel = new Panel(SIZE_MS);
+    private final Panel menuPanel = new Panel(MENU_MS);
     private boolean draggingScale;
+    private boolean draggingPeriod;
 
     private int safeL, safeT, safeR, safeB;
 
@@ -149,6 +181,8 @@ public class ClockView extends View {
     private float contentLeft, contentTop, contentRight, contentBottom;
     private float brandMid, pillMid;
     private float trackLeft, trackRight, trackY;
+    private float periodLeft, periodRight, periodY;
+    private float menuPad, menuHeadingY, periodLabelY;
     private int aboutWidth;
     private Shader pillShader;
 
@@ -160,13 +194,17 @@ public class ClockView extends View {
 
         night = (context.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
                 == Configuration.UI_MODE_NIGHT_YES;
-        scalePercent = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getInt(PREF_SCALE, SCALE_DEFAULT);
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        scalePercent = prefs.getInt(PREF_SCALE, SCALE_DEFAULT);
+        style = prefs.getInt(PREF_STYLE, STYLE_CLOCK);
+        periodStop = stopFor(prefs.getInt(PREF_PERIOD, PERIOD_DEFAULT));
 
         Typeface mono = Typeface.create(Typeface.MONOSPACE, Typeface.NORMAL);
         brandPaint.setTypeface(mono);
         readoutPaint.setTypeface(mono);
         pillPaint.setTypeface(mono);
+        menuPaint.setTypeface(mono);
+        labelPaint.setTypeface(mono);
         sizePaint.setTypeface(mono);
         headingPaint.setTypeface(mono);
         bodyPaint.setTypeface(mono);
@@ -184,6 +222,10 @@ public class ClockView extends View {
         creditText = context.getString(R.string.about_credit).toUpperCase(Locale.ROOT);
         fontText = context.getString(R.string.about_font);
         madeText = context.getString(R.string.about_made);
+        menuHeading = context.getString(R.string.menu_heading).toUpperCase(Locale.ROOT);
+        styleClockLabel = context.getString(R.string.style_colour_clock);
+        styleLoopLabel = context.getString(R.string.style_jack_hughes);
+        periodLabel = context.getString(R.string.menu_period).toUpperCase(Locale.ROOT);
 
         refreshPalette();
     }
@@ -192,8 +234,8 @@ public class ClockView extends View {
 
     /** Startup path: no crossfade from the default mode, just show what was saved. */
     public void restoreMode(int savedMode) {
-        mode = savedMode;
-        prevMode = savedMode;
+        mode = style == STYLE_LOOP ? MODE_TIME : savedMode;
+        prevMode = mode;
         swapProgress = 1f;
         swapStart = -1L;
     }
@@ -212,6 +254,54 @@ public class ClockView extends View {
 
     public int getMode() {
         return mode;
+    }
+
+    public int getStyle() {
+        return style;
+    }
+
+    public void setStyle(int newStyle) {
+        if (newStyle == style) {
+            return;
+        }
+        style = newStyle;
+        if (newStyle == STYLE_LOOP) {
+            // The ring has no hex to show, so the readout goes back to the time and stays there.
+            setMode(MODE_TIME);
+        }
+        storeStyle();
+        readClock();
+        invalidate();
+    }
+
+    /** Picking a source ends the menu; the track under it is the one thing worth watching. */
+    private void setStyleAndClose(int newStyle) {
+        setStyle(newStyle);
+        menuPanel.setOpen(false);
+        wake();
+    }
+
+    /** Minutes for one lap of the ring; only ever one of the eighteen stops. */
+    public int getPeriodMinutes() {
+        return PERIOD_STOPS[periodStop];
+    }
+
+    public void setPeriodMinutes(int minutes) {
+        setPeriodStop(stopFor(minutes), true);
+    }
+
+    // Which panel owns the screen. The three are mutually exclusive, and a test cannot tell
+    // them apart from pixels alone, because both the card and the about panel are page-coloured.
+    public boolean isAboutOpen() {
+        return aboutPanel.isOpen();
+    }
+
+    public boolean isSizeOpen() {
+        return sizePanel.isOpen();
+    }
+
+    public boolean isMenuOpen() {
+        return menuPanel.isOpen();
     }
 
     /** Readout size as a percentage of the base 17.5vmin; the fit clamps still have the last word. */
@@ -274,7 +364,7 @@ public class ClockView extends View {
             return;
         }
         boolean changed = readClock();
-        boolean animating = stepSwap() | stepAbout() | stepSize();
+        boolean animating = stepSwap() | aboutPanel.step() | sizePanel.step() | menuPanel.step();
         if (changed | animating) {
             invalidate();
         }
@@ -304,7 +394,9 @@ public class ClockView extends View {
             timeString = new String(timeChars);
         }
 
-        String next = ColourEngine.hex(hours, minutes, seconds, millis);
+        String next = style == STYLE_LOOP
+                ? ColourLoop.hexAt(System.currentTimeMillis(), getPeriodMinutes())
+                : ColourEngine.hex(hours, minutes, seconds, millis);
         if (!next.equals(hex)) {
             hex = next;
             refreshPalette();
@@ -335,67 +427,62 @@ public class ClockView extends View {
         return true;
     }
 
-    private boolean stepAbout() {
-        if (aboutStart < 0L) {
-            return false;
+    /**
+     * One panel's open/close slide. Cubic ease out, and the duration is the only thing
+     * that distinguishes the three of them.
+     */
+    private static final class Panel {
+        private final long durationMs;
+        private long start = -1L;
+        private float from, to, progress;
+
+        Panel(long durationMs) {
+            this.durationMs = durationMs;
         }
-        float p = (SystemClock.uptimeMillis() - aboutStart) / (float) ABOUT_MS;
-        if (p >= 1f) {
-            aboutStart = -1L;
-            aboutProgress = aboutTo;
-            return false;
+
+        boolean isOpen() {
+            return to > 0.5f;
         }
-        float eased = 1f - (1f - p) * (1f - p) * (1f - p);
-        aboutProgress = aboutFrom + (aboutTo - aboutFrom) * eased;
-        return true;
+
+        float value() {
+            return progress;
+        }
+
+        void setOpen(boolean wantOpen) {
+            if ((to > 0.5f) == wantOpen) {
+                return;
+            }
+            from = progress;
+            to = wantOpen ? 1f : 0f;
+            start = SystemClock.uptimeMillis();
+        }
+
+        /** @return true while the slide is still moving, which is when the view needs 16 fps. */
+        boolean step() {
+            if (start < 0L) {
+                return false;
+            }
+            float p = (SystemClock.uptimeMillis() - start) / (float) durationMs;
+            if (p >= 1f) {
+                start = -1L;
+                progress = to;
+                return false;
+            }
+            float eased = 1f - (1f - p) * (1f - p) * (1f - p);
+            progress = from + (to - from) * eased;
+            return true;
+        }
     }
 
-    private boolean stepSize() {
-        if (sizeStart < 0L) {
-            return false;
-        }
-        float p = (SystemClock.uptimeMillis() - sizeStart) / (float) SIZE_MS;
-        if (p >= 1f) {
-            sizeStart = -1L;
-            sizeProgress = sizeTo;
-            return false;
-        }
-        float eased = 1f - (1f - p) * (1f - p) * (1f - p);
-        sizeProgress = sizeFrom + (sizeTo - sizeFrom) * eased;
-        return true;
-    }
-
-    private void setAboutPanel(boolean open) {
-        if ((aboutTo > 0.5f) == open) {
-            return;
-        }
-        aboutFrom = aboutProgress;
-        aboutTo = open ? 1f : 0f;
-        aboutStart = SystemClock.uptimeMillis();
-        wake();
-    }
-
-    private void setSizePanel(boolean open) {
-        if ((sizeTo > 0.5f) == open) {
-            return;
-        }
-        sizeFrom = sizeProgress;
-        sizeTo = open ? 1f : 0f;
-        sizeStart = SystemClock.uptimeMillis();
-        wake();
-    }
-
-    /** Both panels take over the whole screen, so opening one always puts the other away. */
+    /** Every panel takes the screen over, so opening one always puts the other two away. */
     private void togglePanel(int which) {
-        boolean about = which == HIT_INFO;
-        boolean open = (about ? aboutTo : sizeTo) <= 0.5f;
-        if (about) {
-            setAboutPanel(open);
-            setSizePanel(false);
-        } else {
-            setSizePanel(open);
-            setAboutPanel(false);
-        }
+        Panel hit = which == HIT_INFO ? aboutPanel
+                : which == HIT_SIZE ? sizePanel : menuPanel;
+        boolean open = !hit.isOpen();
+        aboutPanel.setOpen(which == HIT_INFO && open);
+        sizePanel.setOpen(which == HIT_SIZE && open);
+        menuPanel.setOpen(which == HIT_MENU && open);
+        wake();
     }
 
     private void setScale(int percent, boolean persist) {
@@ -412,13 +499,60 @@ public class ClockView extends View {
     }
 
     /** Drag position on the track, snapped so the value lands on whole steps instead of 97%. */
-    private void applyDrag(float x) {
+    private void applyScaleDrag(float x) {
         if (trackRight <= trackLeft) {
             return;
         }
         float ratio = clamp((x - trackLeft) / (trackRight - trackLeft), 0f, 1f);
         int steps = Math.round(ratio * (SCALE_MAX - SCALE_MIN) / SCALE_STEP);
         setScale(SCALE_MIN + steps * SCALE_STEP, false);
+    }
+
+    /**
+     * The period track snaps to the eighteen stops rather than to the minutes they mean, so
+     * the thumb sits evenly along it even though the values run from 1 to 1440.
+     */
+    private void applyPeriodDrag(float x) {
+        if (periodRight <= periodLeft) {
+            return;
+        }
+        float ratio = clamp((x - periodLeft) / (periodRight - periodLeft), 0f, 1f);
+        setPeriodStop(Math.round(ratio * (PERIOD_STOPS.length - 1)), false);
+    }
+
+    private void setPeriodStop(int stop, boolean persist) {
+        int wanted = clamp(stop, 0, PERIOD_STOPS.length - 1);
+        if (wanted == periodStop) {
+            return;
+        }
+        periodStop = wanted;
+        if (persist) {
+            storePeriod();
+        }
+        readClock();
+        invalidate();
+    }
+
+    /** Minutes back to a stop, so a value saved by an older build still puts the thumb somewhere. */
+    private static int stopFor(int minutes) {
+        int best = PERIOD_STOP_DEFAULT;
+        int closest = Integer.MAX_VALUE;
+        for (int i = 0; i < PERIOD_STOPS.length; i++) {
+            int gap = Math.abs(PERIOD_STOPS[i] - minutes);
+            if (gap < closest) {
+                closest = gap;
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    /** Hours where they read better, minutes everywhere else: 90 stays "90 分钟". */
+    private String periodText(int minutes) {
+        if (minutes > 60 && minutes % 60 == 0) {
+            return getContext().getString(R.string.period_hours, minutes / 60);
+        }
+        return getContext().getString(R.string.period_minutes, minutes);
     }
 
     // ---------------------------------------------------------------- colour
@@ -437,13 +571,23 @@ public class ClockView extends View {
     }
 
     private void storeMode() {
-        SharedPreferences prefs = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        prefs.edit().putInt(PREF_MODE, mode).apply();
+        prefs().edit().putInt(PREF_MODE, mode).apply();
     }
 
     private void storeScale() {
-        SharedPreferences prefs = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        prefs.edit().putInt(PREF_SCALE, scalePercent).apply();
+        prefs().edit().putInt(PREF_SCALE, scalePercent).apply();
+    }
+
+    private void storeStyle() {
+        prefs().edit().putInt(PREF_STYLE, style).apply();
+    }
+
+    private void storePeriod() {
+        prefs().edit().putInt(PREF_PERIOD, getPeriodMinutes()).apply();
+    }
+
+    private SharedPreferences prefs() {
+        return getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
     static float luminance(int colour) {
@@ -514,7 +658,6 @@ public class ClockView extends View {
         pillGap = wide ? dp(24f) : dp(16f);
         pillPadH = dp(13f);
         pillBottom = Math.max(h * 0.0575f, dp(14f));
-        brandTracking = dp(4.5f);
         pillTracking = dp(3f);
         aboutPad = wide ? dp(34f) : dp(20f);
         aboutGap = wide ? dp(24f) : dp(16f);
@@ -528,10 +671,7 @@ public class ClockView extends View {
         contentRect.set(contentLeft, contentTop, contentRight, contentBottom);
         float contentW = contentRight - contentLeft;
 
-        brandPaint.setTextSize(dp(16f));
         pillPaint.setTextSize(dp(14f));
-        brandPaint.getFontMetrics(fm);
-        brandMid = (fm.ascent + fm.descent) / 2f;
         pillPaint.getFontMetrics(fm);
         pillMid = (fm.ascent + fm.descent) / 2f;
 
@@ -547,7 +687,11 @@ public class ClockView extends View {
         float iconGap = dp(12f);
         sizeRect.set(infoRect.left - iconGap - infoSize, infoRect.top,
                 infoRect.left - iconGap, infoRect.bottom);
+        menuDiscRect.set(sizeRect.left - iconGap - infoSize, sizeRect.top,
+                sizeRect.left - iconGap, sizeRect.bottom);
+        fitBrand();
 
+        layoutMenu();
         layoutReadout();
 
         double radians = Math.toRadians(205);
@@ -582,6 +726,61 @@ public class ClockView extends View {
             }
             scale *= aboutRoom / need;
         }
+    }
+
+    /**
+     * Three discs plus their gaps are fixed, so the wordmark is the only thing in the header
+     * that can give. It loses tracking first and size second, rather than hiding under a disc.
+     */
+    private void fitBrand() {
+        float left = contentLeft + headerPad + dp(4f);
+        float room = menuDiscRect.left - left - (wide ? dp(32f) : dp(20f));
+        brandPaint.setTextSize(dp(16f));
+        brandTracking = dp(4.5f);
+        float width = trackedWidth(brandPaint, brandText, brandTracking);
+        if (width > room) {
+            brandTracking = Math.max(dp(1.5f),
+                    brandTracking - (width - room) / (brandText.length() - 1));
+            width = trackedWidth(brandPaint, brandText, brandTracking);
+            if (width > room) {
+                brandPaint.setTextSize(dp(16f) * room / width);
+            }
+        }
+        brandPaint.getFontMetrics(fm);
+        brandMid = (fm.ascent + fm.descent) / 2f;
+    }
+
+    /**
+     * The menu hangs from its own disc instead of taking the screen over, so it is measured
+     * against the header row. One rounded card holds the two colour sources and, under them,
+     * the track that picks how long a lap of the ring lasts.
+     */
+    private void layoutMenu() {
+        float cardWidth = Math.min(dp(MENU_WIDTH_DP), contentRight - contentLeft - headerPad * 2f);
+        float pad = dp(18f);
+        float row = dp(44f);
+        menuPad = pad;
+        menuCardRect.set(contentRight - headerPad - cardWidth, menuDiscRect.bottom + dp(12f),
+                contentRight - headerPad, 0f);
+
+        menuHeadingY = menuCardRect.top + pad + dp(10f);
+        float y = menuHeadingY + dp(11f);
+        clockRowRect.set(menuCardRect.left, y, menuCardRect.right, y + row);
+        loopRowRect.set(menuCardRect.left, clockRowRect.bottom, menuCardRect.right,
+                clockRowRect.bottom + row);
+
+        y = loopRowRect.bottom + dp(8f);
+        periodLabelY = y + dp(12f);
+        periodLeft = menuCardRect.left + pad;
+        periodRight = menuCardRect.right - pad;
+        periodY = periodLabelY + dp(26f);
+        // The touch strip is the visible block under the label, which is already taller than
+        // the line itself, so the thumb does not need any slack beyond the card edge.
+        periodRect.set(menuCardRect.left, periodLabelY + dp(4f), menuCardRect.right, periodY + dp(14f));
+        menuCardRect.bottom = periodY + dp(14f);
+
+        labelPaint.setTextSize(dp(13f));
+        menuPaint.setTextSize(dp(16f));
     }
 
     /**
@@ -732,7 +931,7 @@ public class ClockView extends View {
             return;
         }
 
-        float open = aboutProgress;
+        float open = aboutPanel.value();
         cardRect.set(0f, 0f, getWidth(), getHeight());
         if (open > 0f) {
             if (wide) {
@@ -749,21 +948,28 @@ public class ClockView extends View {
         canvas.drawRect(cardRect, overlayPaint);
 
         drawBrand(canvas, contentRect);
+        drawMenuButton(canvas);
         drawSizeButton(canvas);
         drawInfo(canvas);
 
         float content = 1f - open;
         if (content > 0.01f) {
             drawReadout(canvas, content);
-            drawPills(canvas, content);
-            if (sizeProgress > 0.01f) {
-                drawSizeSlider(canvas, sizeProgress * content);
+            // The ring has no time-as-hex to choose between, so its row of pills goes away.
+            if (style == STYLE_CLOCK) {
+                drawPills(canvas, content);
+            }
+            if (sizePanel.value() > 0.01f) {
+                drawSizeSlider(canvas, sizePanel.value() * content);
             }
         }
         canvas.restoreToCount(clip);
 
         if (open > 0.01f) {
             drawAbout(canvas, open);
+        }
+        if (menuPanel.value() > 0.01f) {
+            drawMenu(canvas, menuPanel.value());
         }
     }
 
@@ -776,7 +982,7 @@ public class ClockView extends View {
 
         float gap = wide ? dp(32f) : dp(20f);
         float lineLeft = end + gap;
-        float lineRight = sizeRect.left - gap;
+        float lineRight = menuDiscRect.left - gap;
         if (lineRight - lineLeft > dp(60f)) {
             strokePaint.setColor(pageBackground);
             strokePaint.setAlpha(102);
@@ -800,8 +1006,8 @@ public class ClockView extends View {
         strokePaint.setAlpha(255);
 
         int layer = canvas.save();
-        canvas.rotate(-360f * aboutProgress, cx, cy);
-        if (aboutProgress < 0.5f) {
+        canvas.rotate(-360f * aboutPanel.value(), cx, cy);
+        if (aboutPanel.value() < 0.5f) {
             float r = infoSize * 0.18f;
             strokePaint.setStyle(Paint.Style.FILL);
             canvas.drawCircle(cx, cy - r, r * 0.3f, strokePaint);
@@ -816,11 +1022,142 @@ public class ClockView extends View {
         canvas.restoreToCount(layer);
     }
 
+    /** The third header disc: same wash as its siblings, three lines that fold into a cross. */
+    private void drawMenuButton(Canvas canvas) {
+        float cx = menuDiscRect.centerX();
+        float cy = menuDiscRect.centerY();
+        int fill = (night ? 0x1F : 0x28) + Math.round(0x24 * menuPanel.value());
+        solidPaint.setShader(null);
+        solidPaint.setColor((fill << 24) | 0x00FFFFFF);
+        canvas.drawCircle(cx, cy, infoSize / 2f, solidPaint);
+
+        strokePaint.setStrokeWidth(dp(1.5f));
+        strokePaint.setStrokeCap(Paint.Cap.SQUARE);
+        strokePaint.setColor(cardInk);
+        strokePaint.setAlpha(255);
+        int layer = canvas.save();
+        canvas.rotate(-360f * menuPanel.value(), cx, cy);
+        float r = infoSize * 0.16f;
+        if (menuPanel.value() < 0.5f) {
+            for (int i = -1; i <= 1; i++) {
+                float line = cy + i * r * 0.82f;
+                canvas.drawLine(cx - r, line, cx + r, line, strokePaint);
+            }
+        } else {
+            canvas.drawLine(cx - r, cy - r, cx + r, cy + r, strokePaint);
+            canvas.drawLine(cx - r, cy + r, cx + r, cy - r, strokePaint);
+        }
+        strokePaint.setStrokeCap(Paint.Cap.BUTT);
+        canvas.restoreToCount(layer);
+    }
+
+    /**
+     * The card slides down from its own disc and is opaque, because it floats over the clock
+     * rather than pushing the clock away the way the about panel does.
+     */
+    private void drawMenu(Canvas canvas, float amount) {
+        float dy = dp(8f) * (amount - 1f);
+        int alpha = Math.round(255 * amount);
+        float radius = dp(14f);
+        scratchRect.set(menuCardRect.left, menuCardRect.top + dy,
+                menuCardRect.right, menuCardRect.bottom + dy);
+
+        shape.reset();
+        shape.addRoundRect(scratchRect, radius, radius, Path.Direction.CW);
+        solidPaint.setShader(null);
+        solidPaint.setColor(pageBackground);
+        solidPaint.setAlpha(alpha);
+        canvas.drawPath(shape, solidPaint);
+        strokePaint.setColor(night ? 0x33FFFFFF : 0x14000000);
+        strokePaint.setAlpha(alpha);
+        strokePaint.setStrokeWidth(dp(1f));
+        canvas.drawPath(shape, strokePaint);
+
+        float left = scratchRect.left + menuPad;
+        labelPaint.setColor(ink);
+        labelPaint.setAlpha(Math.round(120 * amount));
+        drawTracked(canvas, menuHeading, left, menuHeadingY + dy, labelPaint, dp(3f));
+
+        drawModeRow(canvas, clockRowRect, styleClockLabel, style == STYLE_CLOCK, HIT_STYLE_CLOCK,
+                left, dy, amount);
+        drawModeRow(canvas, loopRowRect, styleLoopLabel, style == STYLE_LOOP, HIT_STYLE_LOOP,
+                left, dy, amount);
+        // A period that is not in use still answers a drag, it just asks for less attention.
+        drawPeriodTrack(canvas, dy, amount * (style == STYLE_LOOP ? 1f : 0.45f));
+    }
+
+    private void drawModeRow(Canvas canvas, RectF row, String label, boolean selected, int hit,
+                             float textLeft, float dy, float amount) {
+        if (pressed == hit) {
+            solidPaint.setShader(null);
+            solidPaint.setColor(night ? 0x1FFFFFFF : 0x0D000000);
+            solidPaint.setAlpha(Math.round(255 * amount));
+            canvas.drawRect(row.left, row.top + dy, row.right, row.bottom + dy, solidPaint);
+        }
+        float cy = row.centerY() + dy;
+        float r = dp(6.5f);
+        float marker = textLeft + r;
+        strokePaint.setColor(ink);
+        strokePaint.setAlpha(Math.round((selected ? 255 : 110) * amount));
+        strokePaint.setStrokeWidth(dp(1.5f));
+        canvas.drawCircle(marker, cy, r, strokePaint);
+        if (selected) {
+            solidPaint.setShader(null);
+            solidPaint.setColor(ink);
+            solidPaint.setAlpha(Math.round(255 * amount));
+            canvas.drawCircle(marker, cy, r * 0.55f, solidPaint);
+        }
+
+        menuPaint.setColor(ink);
+        menuPaint.setAlpha(Math.round((selected ? 255 : 165) * amount));
+        canvas.drawText(label, textLeft + dp(26f), cy - (menuPaint.ascent() + menuPaint.descent()) / 2f,
+                menuPaint);
+    }
+
+    private void drawPeriodTrack(Canvas canvas, float dy, float amount) {
+        labelPaint.setColor(ink);
+        labelPaint.setAlpha(Math.round(120 * amount));
+        drawTracked(canvas, periodLabel, scratchRect.left + menuPad, periodLabelY + dy,
+                labelPaint, dp(3f));
+
+        String value = periodText(getPeriodMinutes());
+        labelPaint.setAlpha(Math.round(210 * amount));
+        canvas.drawText(value, scratchRect.right - menuPad - labelPaint.measureText(value),
+                periodLabelY + dy, labelPaint);
+
+        float thumb = trackForStop(periodStop);
+        strokePaint.setStrokeCap(Paint.Cap.ROUND);
+        strokePaint.setStrokeWidth(dp(2f));
+        strokePaint.setColor(ink);
+        strokePaint.setAlpha(Math.round(80 * amount));
+        canvas.drawLine(periodLeft, periodY + dy, periodRight, periodY + dy, strokePaint);
+        strokePaint.setAlpha(Math.round(190 * amount));
+        canvas.drawLine(periodLeft, periodY + dy, thumb, periodY + dy, strokePaint);
+
+        // A tick per stop, so it is visible that the thumb only ever comes to rest on eighteen.
+        strokePaint.setStrokeCap(Paint.Cap.BUTT);
+        strokePaint.setStrokeWidth(dp(1f));
+        strokePaint.setAlpha(Math.round(70 * amount));
+        for (int i = 0; i < PERIOD_STOPS.length; i++) {
+            float x = trackForStop(i);
+            canvas.drawLine(x, periodY + dy - dp(5f), x, periodY + dy + dp(5f), strokePaint);
+        }
+
+        solidPaint.setShader(null);
+        solidPaint.setColor(ink);
+        solidPaint.setAlpha(Math.round(255 * amount));
+        canvas.drawCircle(thumb, periodY + dy, dp(9f), solidPaint);
+    }
+
+    private float trackForStop(int stop) {
+        return periodLeft + (periodRight - periodLeft) * stop / (PERIOD_STOPS.length - 1f);
+    }
+
     /** The size toggle is the info disc's sibling: same wash, same ink, an "A" instead of an "i". */
     private void drawSizeButton(Canvas canvas) {
         float cx = sizeRect.centerX();
         float cy = sizeRect.centerY();
-        int fill = (night ? 0x1F : 0x28) + Math.round(0x24 * sizeProgress);
+        int fill = (night ? 0x1F : 0x28) + Math.round(0x24 * sizePanel.value());
         solidPaint.setShader(null);
         solidPaint.setColor((fill << 24) | 0x00FFFFFF);
         canvas.drawCircle(cx, cy, infoSize / 2f, solidPaint);
@@ -1055,7 +1392,12 @@ public class ClockView extends View {
             if (pressed != HIT_NONE) {
                 if (pressed == HIT_SLIDER) {
                     draggingScale = true;
-                    applyDrag(x);
+                    applyScaleDrag(x);
+                } else if (pressed == HIT_PERIOD) {
+                    // Grabbing the track is the clearest possible way of asking for the ring.
+                    setStyle(STYLE_LOOP);
+                    draggingPeriod = true;
+                    applyPeriodDrag(x);
                 }
                 invalidate();
                 return true;
@@ -1065,7 +1407,12 @@ public class ClockView extends View {
         if (action == MotionEvent.ACTION_MOVE) {
             if (draggingScale) {
                 // The finger may leave the strip mid-drag; keep following it until it lifts.
-                applyDrag(x);
+                applyScaleDrag(x);
+                invalidate();
+                return true;
+            }
+            if (draggingPeriod) {
+                applyPeriodDrag(x);
                 invalidate();
                 return true;
             }
@@ -1080,10 +1427,16 @@ public class ClockView extends View {
             return true;
         }
         if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-            if (draggingScale) {
+            if (draggingScale || draggingPeriod) {
+                // A drag persists once, on release, so the slider never writes prefs per frame.
+                if (draggingScale) {
+                    storeScale();
+                } else {
+                    storePeriod();
+                }
                 draggingScale = false;
+                draggingPeriod = false;
                 pressed = HIT_NONE;
-                storeScale();
                 invalidate();
                 return true;
             }
@@ -1106,7 +1459,24 @@ public class ClockView extends View {
         if (sizeRect.contains(x, y)) {
             return HIT_SIZE;
         }
-        if (aboutProgress > 0.5f) {
+        if (menuDiscRect.contains(x, y)) {
+            return HIT_MENU;
+        }
+        if (menuPanel.value() > 0.5f) {
+            // The card floats above the clock, so it is asked first; anything it does not
+            // cover closes it instead of reaching through to the readout underneath.
+            if (clockRowRect.contains(x, y)) {
+                return HIT_STYLE_CLOCK;
+            }
+            if (loopRowRect.contains(x, y)) {
+                return HIT_STYLE_LOOP;
+            }
+            if (periodRect.contains(x, y)) {
+                return HIT_PERIOD;
+            }
+            return HIT_BEHIND_MENU;
+        }
+        if (aboutPanel.value() > 0.5f) {
             if (creditRect.contains(x, y)) {
                 return HIT_CREDIT;
             }
@@ -1114,8 +1484,11 @@ public class ClockView extends View {
         }
         // The strip sits inside the readout band, so it has to be asked first or the tap
         // would switch modes instead of dragging.
-        if (sizeProgress > 0.5f && sliderRect.contains(x, y)) {
+        if (sizePanel.value() > 0.5f && sliderRect.contains(x, y)) {
             return HIT_SLIDER;
+        }
+        if (style == STYLE_LOOP) {
+            return HIT_NONE;
         }
         if (timeRect.contains(x, y)) {
             return HIT_TIME;
@@ -1129,10 +1502,19 @@ public class ClockView extends View {
     private void handleTap(int hit) {
         switch (hit) {
             case HIT_INFO:
-                togglePanel(HIT_INFO);
-                break;
             case HIT_SIZE:
-                togglePanel(HIT_SIZE);
+            case HIT_MENU:
+                togglePanel(hit);
+                break;
+            case HIT_BEHIND_MENU:
+                menuPanel.setOpen(false);
+                wake();
+                break;
+            case HIT_STYLE_CLOCK:
+                setStyleAndClose(STYLE_CLOCK);
+                break;
+            case HIT_STYLE_LOOP:
+                setStyleAndClose(STYLE_LOOP);
                 break;
             case HIT_TIME:
                 setMode(MODE_TIME);

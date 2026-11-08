@@ -5,7 +5,9 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.robolectric.Shadows.shadowOf;
 
+import android.app.Activity;
 import android.content.Context;
+import android.content.pm.ActivityInfo;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -19,6 +21,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TestName;
 import org.junit.runner.RunWith;
+import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
@@ -354,6 +357,172 @@ public class ClockViewRenderTest {
         save(f.bitmap);
     }
 
+    /**
+     * The third disc opens a card of its own, floating over the clock instead of pushing it
+     * away like the about panel does. It is opaque, so its box stops showing the clock colour
+     * the moment it is up, and nothing else on the screen may move.
+     */
+    @Test
+    @Config(qualifiers = "w411dp-h914dp-port-notnight-420dpi")
+    public void menuDiscOpensTheCard() throws Exception {
+        Fixture f = new Fixture(PORTRAIT_W, PORTRAIT_H, 0xFFFFFFFF, 0);
+        assertEquals(ClockView.STYLE_CLOCK, f.view.getStyle());
+        assertEquals(ClockView.PERIOD_DEFAULT, f.view.getPeriodMinutes());
+        assertFalse("menu open at start-up", f.view.isMenuOpen());
+
+        f.draw();
+        int samples = cardSamples(f);
+        assertTrue("the card box does not show the clock colour yet",
+                menuCardPixels(f) < samples / 20);
+
+        tap(f.view, menuCentreX(PORTRAIT_W, false), infoCentreY(PORTRAIT_W, 0));
+        f.settle();
+        f.draw();
+        int covered = menuCardPixels(f);
+        assertTrue("menu card did not open (" + covered + "/" + samples + ")",
+                covered > samples * 3 / 4);
+        assertTrue(f.view.isMenuOpen());
+        assertFalse("the menu opened the slider too", f.view.isSizeOpen());
+        assertEquals("opening the menu changed the mode", ClockView.STYLE_CLOCK, f.view.getStyle());
+        assertTrue("pill row vanished behind the menu", pillInk(f) > 300);
+        save(f.bitmap);
+    }
+
+    /** A tap that misses the card only puts it away; it must not reach the clock underneath. */
+    @Test
+    @Config(qualifiers = "w411dp-h914dp-port-notnight-420dpi")
+    public void tapBehindTheMenuClosesIt() throws Exception {
+        Fixture f = new Fixture(PORTRAIT_W, PORTRAIT_H, 0xFFFFFFFF, 0);
+        tap(f.view, menuCentreX(PORTRAIT_W, false), infoCentreY(PORTRAIT_W, 0));
+        f.settle();
+        f.draw();
+        assertTrue("card did not open", menuCardPixels(f) > cardSamples(f) * 3 / 4);
+
+        // Left of the card and below it, which is exactly where the big readout lives.
+        tap(f.view, dp(40f), Math.round(periodTrackY(PORTRAIT_W, 0) + dp(120f)));
+        f.settle();
+        f.draw();
+        assertFalse("tap outside the card left it open", f.view.isMenuOpen());
+        assertTrue("card box still covered", menuCardPixels(f) < cardSamples(f) / 20);
+        assertEquals(ClockView.STYLE_CLOCK, f.view.getStyle());
+        assertEquals("tap reached through the card", ClockView.MODE_TIME, f.view.getMode());
+        save(f.bitmap);
+    }
+
+    /**
+     * Jack Hughes is the other half of the same menu, so picking it closes the card, and it
+     * takes the two capsules with it: their hex readout means nothing once the colour has
+     * stopped being the time.
+     */
+    @Test
+    @Config(qualifiers = "w411dp-h914dp-port-notnight-420dpi")
+    public void loopModeTakesThePillsAway() throws Exception {
+        Fixture f = new Fixture(PORTRAIT_W, PORTRAIT_H, 0xFFFFFFFF, 0);
+        tap(f.view, menuCentreX(PORTRAIT_W, false), infoCentreY(PORTRAIT_W, 0));
+        f.settle();
+        assertTrue("the hex mode still has its capsules", pillInk(f) > 300);
+
+        tap(f.view, cardRight(PORTRAIT_W) - dp(40f), loopRowY(PORTRAIT_W, 0));
+        f.settle();
+        f.draw();
+        assertEquals(ClockView.STYLE_LOOP, f.view.getStyle());
+        assertEquals("a ring has no hex to show", ClockView.MODE_TIME, f.view.getMode());
+        assertFalse("menu did not close", f.view.isMenuOpen());
+        assertTrue("capsules survived the ring: " + pillInk(f), pillInk(f) < 60);
+
+        // What is on screen is the ring at this instant, which f.colour now reports.
+        int samples = (PORTRAIT_W / 4) * (PORTRAIT_H / 4);
+        int matched = countNear(f.bitmap, f.colour, 0, 0, PORTRAIT_W, PORTRAIT_H, SHADE);
+        assertTrue("screen is not the ring colour (" + matched + "/" + samples + ")",
+                matched > samples * 8 / 10);
+        assertReadoutNotClipped(f);
+        save(f.bitmap, "-loop");
+
+        tap(f.view, menuCentreX(PORTRAIT_W, false), infoCentreY(PORTRAIT_W, 0));
+        f.settle();
+        tap(f.view, cardRight(PORTRAIT_W) - dp(40f), clockRowY(PORTRAIT_W, 0));
+        f.settle();
+        f.draw();
+        assertEquals(ClockView.STYLE_CLOCK, f.view.getStyle());
+        assertTrue("capsules did not come back", pillInk(f) > 300);
+        save(f.bitmap, "-back");
+    }
+
+    /**
+     * The period track is the only place the length of a lap is set. It snaps to the eighteen
+     * stops, picks the ring mode for you if you grab it anyway, survives the next start-up, and
+     * the screen then paints the ring for the lap that was chosen.
+     */
+    @Test
+    @Config(qualifiers = "w411dp-h914dp-port-notnight-420dpi")
+    public void periodTrackSnapsAndRemembers() throws Exception {
+        Fixture f = new Fixture(PORTRAIT_W, PORTRAIT_H, 0xFFFFFFFF, 0);
+        tap(f.view, menuCentreX(PORTRAIT_W, false), infoCentreY(PORTRAIT_W, 0));
+        f.settle();
+
+        float y = periodTrackY(PORTRAIT_W, 0);
+        drag(f.view, periodLeft(PORTRAIT_W), y, periodRight(PORTRAIT_W));
+        f.settle();
+        assertEquals(ClockView.STYLE_LOOP, f.view.getStyle());
+        assertEquals("far right is a day", 1440, f.view.getPeriodMinutes());
+
+        // A quarter of the way along is the fifth stop, not a quarter of a day.
+        drag(f.view, periodRight(PORTRAIT_W), y,
+                periodLeft(PORTRAIT_W) + (periodRight(PORTRAIT_W) - periodLeft(PORTRAIT_W)) / 4f);
+        f.settle();
+        assertEquals("the stops are evenly spaced", 10, f.view.getPeriodMinutes());
+
+        assertEquals("value written through", 10, RuntimeEnvironment.getApplication()
+                .getSharedPreferences(ClockView.PREFS, Context.MODE_PRIVATE)
+                .getInt(ClockView.PREF_PERIOD, 0));
+        assertEquals(10, new ClockView(RuntimeEnvironment.getApplication()).getPeriodMinutes());
+        assertEquals(10, f.view.getPeriodMinutes());
+
+        // The shortest lap is a minute; the pixels have to sit on that ring, not the day-long one.
+        drag(f.view, periodRight(PORTRAIT_W), y, periodLeft(PORTRAIT_W));
+        f.settle();
+        f.draw();
+        assertEquals(1, f.view.getPeriodMinutes());
+        // A corner clear of the digits, the card and the capsules, so this pixel is the colour.
+        int probeX = Math.round(dp(20f));
+        int probeY = Math.round(dp(700f));
+        assertTrue("minute lap painted off its own ring",
+                close(f.pixel(probeX, probeY), f.colour, SHADE));
+        save(f.bitmap, "-ring");
+    }
+
+    /** Three panels now share the header, so opening one still puts every other one away. */
+    @Test
+    @Config(qualifiers = "w411dp-h914dp-port-notnight-420dpi")
+    public void aboutPanelClosesTheMenu() throws Exception {
+        Fixture f = new Fixture(PORTRAIT_W, PORTRAIT_H, 0xFFFFFFFF, 0);
+        tap(f.view, menuCentreX(PORTRAIT_W, false), infoCentreY(PORTRAIT_W, 0));
+        f.settle();
+        tap(f.view, infoCentreX(PORTRAIT_W), infoCentreY(PORTRAIT_W, 0));
+        f.settle();
+        f.draw();
+
+        assertTrue(f.view.isAboutOpen());
+        assertFalse("menu survived the about panel", f.view.isMenuOpen());
+        int below = Math.round(dp(320f));
+        int copy = countNear(f.bitmap, f.ink, 0, below, PORTRAIT_W, PORTRAIT_H, SHADE);
+        assertTrue("about copy did not open (" + copy + " ink px)", copy > 200);
+        save(f.bitmap);
+    }
+
+    /**
+     * The handset rotated the wrong way in reverse portrait because the manifest asked for
+     * "user", which leaves that quarter turn out. FULL_USER is only set from API 18 up, so
+     * the old releases have to keep the manifest value rather than an unknown constant.
+     */
+    @Test
+    @Config(qualifiers = "w411dp-h914dp-port-notnight-420dpi")
+    public void reversePortraitIsAllowedFromApi18() throws Exception {
+        Activity activity = Robolectric.buildActivity(MainActivity.class).setup().get();
+        assertEquals(ActivityInfo.SCREEN_ORIENTATION_FULL_USER, activity.getRequestedOrientation());
+        activity.finish();
+    }
+
     // ---------------------------------------------------------------- fixtures
 
     private final class Fixture {
@@ -361,8 +530,9 @@ public class ClockViewRenderTest {
         final Bitmap bitmap;
         final Canvas canvas;
         final int page;
-        final int colour;
-        final int ink;
+        /** What the screen is painted right now, which depends on which colour source is live. */
+        int colour;
+        int ink;
 
         Fixture(int width, int height, int page) {
             this(width, height, page, 0);
@@ -376,14 +546,8 @@ public class ClockViewRenderTest {
                     View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY));
             view.layout(0, 0, width, height);
             view.startTicking();
-            settle();
             this.page = page;
-            Calendar now = Calendar.getInstance();
-            now.setTimeInMillis(System.currentTimeMillis());
-            String hex = ColourEngine.hex(now.get(Calendar.HOUR_OF_DAY), now.get(Calendar.MINUTE),
-                    now.get(Calendar.SECOND), now.get(Calendar.MILLISECOND));
-            colour = 0xFF000000 | Integer.parseInt(hex, 16);
-            ink = ClockView.readable(colour, page);
+            settle();
             bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
             canvas = new Canvas(bitmap);
         }
@@ -401,6 +565,22 @@ public class ClockViewRenderTest {
             for (int i = 0; i < 40; i++) {
                 shadowOf(Looper.getMainLooper()).idleFor(100, TimeUnit.MILLISECONDS);
             }
+            resync();
+        }
+
+        /**
+         * The last tick ran at the end of the idle window, so the colour the view settled on is
+         * the one this instant maps to, whichever of the two sources the mode is using.
+         */
+        void resync() {
+            Calendar now = Calendar.getInstance();
+            now.setTimeInMillis(System.currentTimeMillis());
+            String hex = view.getStyle() == ClockView.STYLE_LOOP
+                    ? ColourLoop.hexAt(now.getTimeInMillis(), view.getPeriodMinutes())
+                    : ColourEngine.hex(now.get(Calendar.HOUR_OF_DAY), now.get(Calendar.MINUTE),
+                            now.get(Calendar.SECOND), now.get(Calendar.MILLISECOND));
+            colour = 0xFF000000 | Integer.parseInt(hex, 16);
+            ink = ClockView.readable(colour, page);
         }
     }
 
@@ -436,6 +616,48 @@ public class ClockViewRenderTest {
 
     private static float sizeCentreX(int width, boolean wide) {
         return infoCentreX(width, wide) - dp(12f) - dp(40f);
+    }
+
+    private static float menuCentreX(int width, boolean wide) {
+        return sizeCentreX(width, wide) - dp(12f) - dp(40f);
+    }
+
+    // The card hangs from the menu disc; these mirror layoutMenu() line for line.
+    private static float cardRight(int width) {
+        return width - outerPad(width) - headerPad(width);
+    }
+
+    private static float cardLeft(int width) {
+        float contentW = width - outerPad(width) * 2f;
+        return cardRight(width) - Math.min(dp(300f), contentW - headerPad(width) * 2f);
+    }
+
+    private static float cardTop(int width, int safeTop) {
+        return outerPad(width) + safeTop + headerPad(width) + dp(40f) + dp(12f);
+    }
+
+    private static float menuHeadingY(int width, int safeTop) {
+        return cardTop(width, safeTop) + dp(18f) + dp(10f);
+    }
+
+    private static float clockRowY(int width, int safeTop) {
+        return menuHeadingY(width, safeTop) + dp(11f) + dp(44f) / 2f;
+    }
+
+    private static float loopRowY(int width, int safeTop) {
+        return clockRowY(width, safeTop) + dp(44f);
+    }
+
+    private static float periodTrackY(int width, int safeTop) {
+        return menuHeadingY(width, safeTop) + dp(11f) + dp(88f) + dp(8f) + dp(12f) + dp(26f);
+    }
+
+    private static float periodLeft(int width) {
+        return cardLeft(width) + dp(18f);
+    }
+
+    private static float periodRight(int width) {
+        return cardRight(width) - dp(18f);
     }
 
     /** The strip floats above the pill row: band bottom, then the pill gap, then 18dp. */
@@ -593,6 +815,51 @@ public class ClockViewRenderTest {
         for (int row = top; row < bottom; row++) {
             for (int x = from; x < right; x++) {
                 if (!close(f.pixel(x, row), f.colour, 16)) {
+                    found++;
+                }
+            }
+        }
+        return found;
+    }
+
+    /** The card box, shrunk a little so the rounded corners never count as copy. */
+    private static int[] cardBox(Fixture f) {
+        int width = f.view.getWidth();
+        return new int[]{Math.round(cardLeft(width)) + 8, Math.round(cardTop(width, 0)) + 8,
+                Math.round(cardRight(width)) - 8, Math.round(periodTrackY(width, 0))};
+    }
+
+    /** Samples the card box holds, so the counts below can be read as fractions. */
+    private static int cardSamples(Fixture f) {
+        int[] box = cardBox(f);
+        return ((box[3] - box[1]) / 4) * ((box[2] - box[0]) / 4);
+    }
+
+    /** The card is opaque, so anything in its box that is not the clock colour is the card. */
+    private static int menuCardPixels(Fixture f) {
+        int[] box = cardBox(f);
+        int found = 0;
+        for (int y = box[1]; y < box[3]; y += 4) {
+            for (int x = box[0]; x < box[2]; x += 4) {
+                if (!close(f.pixel(x, y), f.colour, 16)) {
+                    found++;
+                }
+            }
+        }
+        return found;
+    }
+
+    /** Anything in the capsule row that is not the card colour is a pill being drawn. */
+    private static int pillInk(Fixture f) {
+        int width = f.view.getWidth();
+        int height = f.view.getHeight();
+        int mid = Math.round(pillMidY(width, height, 0));
+        int from = Math.round(outerPad(width)) + 4;
+        int right = Math.round(width - outerPad(width)) - 4;
+        int found = 0;
+        for (int y = mid - Math.round(dp(24f)); y < mid + Math.round(dp(24f)); y++) {
+            for (int x = from; x < right; x++) {
+                if (!close(f.pixel(x, y), f.colour, 16)) {
                     found++;
                 }
             }
