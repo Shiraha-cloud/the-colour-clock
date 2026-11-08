@@ -388,6 +388,31 @@ public class ClockViewRenderTest {
         save(f.bitmap);
     }
 
+    /**
+     * The card is measured from the header rather than the screen, so the wide layout has to be
+     * checked on its own: 411dp of height is not much room for a heading, two rows and a track.
+     */
+    @Test
+    @Config(qualifiers = "w914dp-h411dp-land-notnight-420dpi")
+    public void landscapeMenuKeepsTheCardInside() throws Exception {
+        Fixture f = new Fixture(LANDSCAPE_W, LANDSCAPE_H, 0xFFFFFFFF, 0);
+        tap(f.view, menuCentreX(LANDSCAPE_W, true), infoCentreY(LANDSCAPE_W, 0));
+        f.settle();
+        f.draw();
+        assertTrue("landscape card did not open",
+                menuCardPixels(f) > cardSamples(f) * 3 / 4);
+        assertTrue("the track ran off the screen", periodTrackY(LANDSCAPE_W, 0) < LANDSCAPE_H - dp(8f));
+
+        float rowX = (cardLeft(LANDSCAPE_W) + cardRight(LANDSCAPE_W)) / 2f;
+        tap(f.view, rowX, loopRowY(LANDSCAPE_W, 0));
+        f.settle();
+        f.draw();
+        assertEquals(ClockView.STYLE_LOOP, f.view.getStyle());
+        assertFalse("picking a mode left the card open", f.view.isMenuOpen());
+        assertColourReachesEveryEdge(f);
+        save(f.bitmap);
+    }
+
     /** A tap that misses the card only puts it away; it must not reach the clock underneath. */
     @Test
     @Config(qualifiers = "w411dp-h914dp-port-notnight-420dpi")
